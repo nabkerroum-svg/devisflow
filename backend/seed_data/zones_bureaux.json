@@ -1,0 +1,87 @@
+[
+  {
+    "code": "accueil_bureaux",
+    "titre": "Accueil / Bureaux / salle de réunion",
+    "freq_var": "FREQ_ACCUEIL_BUREAUX",
+    "operations": [
+      "Vidage des corbeilles",
+      "Aspiration des sols moquette",
+      "Dépoussiérage des plinthes",
+      "Enlèvement des toiles d’araignée",
+      "Enlèvement des traces de doigt sur les portes",
+      "Essuyage des bureaux et tables de réunion",
+      "Essuyage et désinfection des combinés téléphoniques"
+    ]
+  },
+  {
+    "code": "circulation",
+    "titre": "Circulation",
+    "freq_var": "FREQ_CIRCULATION",
+    "operations": [
+      "Aspiration des sols moquette",
+      "Balayage humide des sols",
+      "Dépoussiérage des plinthes",
+      "Enlèvement des toiles d’araignée",
+      "Lavage des sols avec produit détergent",
+      "Enlèvement des traces de doigt sur les portes"
+    ]
+  },
+  {
+    "code": "sanitaires",
+    "titre": "Sanitaires",
+    "freq_var": "FREQ_SANITAIRES",
+    "operations": [
+      "Balayage des sols des sanitaires",
+      "Nettoyage et désinfection des cuvettes WC",
+      "Nettoyage brosse sanitaires",
+      "Nettoyage et désinfection de la faïence",
+      "Lavage et désinfection des sols des sanitaires",
+      "Vidage des corbeilles",
+      "Lavage et désinfection des lavabos",
+      "Lavage essuyage de la robinetterie",
+      "Nettoyage du miroir",
+      "Nettoyage et désinfection des boutons lumineux",
+      "Désinfection poignée de portes"
+    ]
+  },
+  {
+    "code": "cuisine",
+    "titre": "Cuisine : Espace pause – cafétéria",
+    "freq_var": "FREQ_CUISINE",
+    "operations": [
+      "Vidage des corbeilles",
+      "Aspiration des sols moquette",
+      "Balayage humide des sols",
+      "Dépoussiérage des plinthes",
+      "Enlèvement des toiles d’araignée",
+      "Lavage des sols avec produit détergent",
+      "Enlèvement des traces de doigt sur les portes",
+      "Nettoyage des tables avec produit spécifique \"alimentaire\"",
+      "Lavage et désinfection des éviers",
+      "Lavage essuyage de la robinetterie",
+      "Nettoyage petit matériel (micro-onde, cafetière, distributeur…)"
+    ]
+  },
+  {
+    "code": "vitrerie",
+    "titre": "Vitrerie extérieure / intérieure",
+    "freq_var": "FREQ_VITRERIE",
+    "operations": [
+      "Vitrerie extérieure (intérieur et extérieur)",
+      "Vitrerie extérieure : nettoyage des encadrements (intérieur & extérieur)",
+      "Vitrerie intérieure (intérieur et extérieur)",
+      "Vitrerie intérieure : nettoyage des encadrements (intérieur & extérieur)"
+    ]
+  },
+  {
+    "code": "consommables",
+    "titre": "Fourniture et mise en place des consommables sanitaires",
+    "freq_var": null,
+    "operations": [
+      "Papier hygiénique",
+      "Savon liquide",
+      "Désodorisant automatique",
+      "Dimensionnement pour une fréquentation d’environ {{ NB_COLLABORATEURS }} collaborateurs et des visiteurs"
+    ]
+  }
+]

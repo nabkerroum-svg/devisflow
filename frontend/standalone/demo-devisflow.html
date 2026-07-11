@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevisFlow · Démo — Marie Eugénie</title>
+<style>
+/* =====================================================================
+   DevisFlow — Maquette de démonstration
+   Charte Marie Eugénie : noir profond + or discret, typographie Arial.
+   Signature : aperçu A4 vivant à droite, qui se met à jour en temps réel.
+   ===================================================================== */
+
+:root{
+  --ink:#161513;          /* noir chaud du logo */
+  --ink-soft:#4a463f;
+  --gold:#a9863f;         /* or discret */
+  --gold-soft:#d9c49a;
+  --line:#e4e0d7;
+  --paper:#ffffff;
+  --bg:#f3f1ec;           /* fond crème très désaturé */
+  --bg-panel:#faf8f4;
+  --ok:#2f7d4f;
+  --warn:#b4621b;
+  --err:#b42318;
+  --radius:10px;
+  --shadow:0 1px 2px rgba(22,21,19,.06), 0 8px 24px rgba(22,21,19,.06);
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  --sans:Arial,"Helvetica Neue",Helvetica,sans-serif;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  font-family:var(--sans); color:var(--ink); background:var(--bg);
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{margin:0; font-weight:700; letter-spacing:-.01em}
+button{font-family:inherit}
+input,select{font-family:inherit; font-size:13px}
+
+/* ---------- Top bar ---------- */
+.topbar{
+  display:flex; align-items:center; gap:16px;
+  padding:14px 26px; background:var(--ink); color:#fff;
+  position:sticky; top:0; z-index:30;
+}
+.brand{display:flex; align-items:baseline; gap:10px}
+.brand .mark{
+  font-weight:700; letter-spacing:.18em; font-size:15px;
+}
+.brand .mark b{color:var(--gold-soft)}
+.brand .sub{font-size:11px; color:#b9b3a6; letter-spacing:.22em; text-transform:uppercase}
+.demo-pill{
+  margin-left:auto; font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--ink); background:var(--gold-soft);
+  padding:5px 11px; border-radius:999px; font-weight:700;
+}
+
+/* ---------- Layout ---------- */
+.shell{
+  display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+  gap:26px; max-width:1480px; margin:0 auto; padding:26px;
+  align-items:start;
+}
+@media (max-width:1080px){ .shell{grid-template-columns:1fr} }
+
+/* ---------- Type selector (segmented) ---------- */
+.type-switch{
+  display:flex; gap:6px; background:var(--bg-panel);
+  border:1px solid var(--line); border-radius:999px; padding:5px; margin-bottom:18px;
+}
+.type-switch button{
+  flex:1; border:0; background:transparent; cursor:pointer;
+  padding:10px 14px; border-radius:999px; font-size:13px; font-weight:600;
+  color:var(--ink-soft); transition:.15s;
+}
+.type-switch button .k{display:block; font-size:11px; font-weight:400; color:#8c877c}
+.type-switch button.active{background:var(--ink); color:#fff}
+.type-switch button.active .k{color:var(--gold-soft)}
+
+/* ---------- Cards ---------- */
+.panel{display:flex; flex-direction:column; gap:18px}
+.card{
+  background:var(--paper); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden;
+}
+.card__head{
+  display:flex; align-items:center; gap:10px;
+  padding:13px 18px; border-bottom:1px solid var(--line);
+}
+.card__head .idx{
+  font-family:var(--mono); font-size:11px; color:#fff; background:var(--gold);
+  width:22px; height:22px; border-radius:6px; display:grid; place-items:center; font-weight:700;
+}
+.card__head h3{font-size:14px}
+.card__body{padding:16px 18px}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+.grid3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px}
+@media (max-width:520px){ .grid2,.grid3{grid-template-columns:1fr} }
+
+.field{display:flex; flex-direction:column; gap:5px; margin-bottom:2px}
+.field label{font-size:12px; color:var(--ink-soft); font-weight:600}
+.field input,.field select{
+  padding:9px 10px; border:1px solid #d8d3c8; border-radius:8px; background:#fff;
+}
+.field input:focus,.field select:focus{outline:2px solid var(--gold-soft); border-color:var(--gold)}
+.help{font-size:11.5px; color:#8c877c}
+
+/* ---------- Prestations table ---------- */
+.lignes{width:100%; border-collapse:collapse; margin-top:4px}
+.lignes th{
+  text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em;
+  color:#8c877c; font-weight:700; padding:6px 8px; border-bottom:1px solid var(--line);
+}
+.lignes td{padding:5px 8px; border-bottom:1px solid #f1eee7; vertical-align:middle}
+.lignes input,.lignes select{width:100%; padding:7px 7px; border:1px solid #d8d3c8; border-radius:7px}
+.lignes .num{width:74px} .lignes .nar{width:62px}
+.row-photo-tag{font-size:11px; color:var(--gold); font-weight:700; white-space:nowrap}
+.btn-x{border:1px solid #f0c9c4; color:var(--err); background:#fff; border-radius:7px; cursor:pointer; padding:6px 9px; line-height:1}
+
+/* ---------- Buttons ---------- */
+.btn{
+  border:1px solid var(--ink); background:var(--ink); color:#fff; cursor:pointer;
+  padding:10px 16px; border-radius:8px; font-size:13px; font-weight:600; transition:.15s;
+}
+.btn:hover{background:#000}
+.btn--ghost{background:#fff; color:var(--ink)}
+.btn--ghost:hover{background:var(--bg-panel)}
+.btn--sm{padding:7px 11px; font-size:12px}
+.btn--gold{background:var(--gold); border-color:var(--gold)}
+.btn--gold:hover{background:#977430}
+
+/* ---------- Frequencies ---------- */
+.freqs{display:flex; flex-wrap:wrap; gap:8px}
+.freqs label{
+  display:inline-flex; align-items:center; gap:6px; font-size:12.5px;
+  border:1px solid var(--line); border-radius:999px; padding:6px 11px; cursor:pointer; user-select:none;
+}
+.freqs label.on{border-color:var(--gold); background:#fbf6ec; color:var(--ink); font-weight:600}
+
+/* ---------- Totals strip ---------- */
+.totals{
+  display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+  background:var(--bg-panel); border:1px solid var(--line); border-radius:10px;
+  padding:12px 16px; margin-top:14px;
+}
+.totals .t{display:flex; flex-direction:column}
+.totals .t .lab{font-size:11px; color:#8c877c; text-transform:uppercase; letter-spacing:.05em}
+.totals .t .val{font-size:18px; font-weight:700}
+.totals .t.ttc .val{color:var(--gold)}
+.totals .sep{width:1px; align-self:stretch; background:var(--line)}
+.totals .override{margin-left:auto; display:flex; flex-direction:column; gap:4px}
+.totals .override input{width:150px; padding:8px; border:1px solid #d8d3c8; border-radius:7px}
+.badge-auto{font-size:11px; color:var(--ok); font-weight:700}
+.badge-over{font-size:11px; color:var(--warn); font-weight:700}
+
+/* ---------- Equipment library (mockup) ---------- */
+.equip-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px}
+@media (max-width:680px){ .equip-grid{grid-template-columns:repeat(2,1fr)} }
+.equip{
+  border:1px solid var(--line); border-radius:9px; padding:10px; cursor:pointer;
+  background:#fff; text-align:center; transition:.12s;
+}
+.equip:hover{border-color:var(--gold-soft); transform:translateY(-1px)}
+.equip.sel{border-color:var(--gold); background:#fbf6ec; box-shadow:0 0 0 2px var(--gold-soft)}
+.equip .thumb{
+  height:62px; border-radius:7px; margin-bottom:8px; display:grid; place-items:center;
+  background:linear-gradient(135deg,#efece4,#e2ddd2); color:#9a9486;
+}
+.equip .thumb svg{width:34px; height:34px; opacity:.85}
+.equip .name{font-size:12px; font-weight:600}
+.equip .cat{font-size:10.5px; color:#8c877c}
+
+/* ---------- Document preview (signature) ---------- */
+.preview-wrap{position:sticky; top:78px}
+.preview-toolbar{
+  display:flex; align-items:center; gap:10px; margin-bottom:12px;
+}
+.preview-toolbar .lab{font-size:12px; color:var(--ink-soft); font-weight:600}
+.preview-toolbar .dot{width:7px; height:7px; border-radius:50%; background:var(--ok)}
+.paper-scroll{
+  background:#dedacf; border:1px solid var(--line); border-radius:12px;
+  padding:22px; max-height:calc(100vh - 140px); overflow:auto;
+}
+/* A4 sheet, scaled */
+.sheet{
+  width:100%; max-width:520px; margin:0 auto 18px; background:#fff;
+  box-shadow:0 6px 22px rgba(0,0,0,.16); padding:30px 34px; font-size:11px; color:#222;
+  min-height:680px;
+}
+.sheet .mehead{display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid var(--ink); padding-bottom:8px}
+.sheet .logo{font-weight:700; letter-spacing:.16em; font-size:15px}
+.sheet .logo small{display:block; font-weight:400; letter-spacing:.18em; font-size:8px; color:#777}
+.sheet .assoc{font-style:italic; color:#444; font-size:10px; align-self:center}
+.sheet .meta-date{text-align:right; font-size:10px; margin:10px 0 4px}
+.sheet .dest{text-align:right; font-weight:700; line-height:1.45}
+.sheet .dest .soft{font-weight:400}
+.sheet .title{text-align:center; font-weight:700; font-size:15px; margin:24px 0 4px}
+.sheet .subtitle{text-align:center; font-size:12px; margin:2px 0}
+.sheet .site{text-align:center; font-weight:700; margin:10px 0 18px}
+.sheet h4{font-size:11px; border-bottom:1px solid #ccc; padding-bottom:3px; margin:16px 0 8px; text-transform:none}
+.sheet ul{margin:6px 0; padding-left:18px}
+.sheet li{margin:2px 0}
+.sheet .freqline{color:#555; font-style:italic; margin:2px 0 8px}
+.fin-table{width:100%; border-collapse:collapse; margin:8px 0}
+.fin-table th,.fin-table td{border:1px solid #333; padding:6px 6px; text-align:center; font-size:10px}
+.fin-table th{font-weight:700}
+.fin-table td.lib{text-align:left}
+.fin-table .ht,.fin-table .ttc{font-weight:700}
+/* prestation + photo aligned row (the fix demo) */
+.presta-row{display:flex; gap:12px; align-items:flex-start; margin:8px 0; padding:6px; border:1px dashed transparent}
+.presta-row .txt{flex:1}
+.presta-row .photo{
+  width:120px; flex:0 0 120px; border:1px solid #d6d0c4; border-radius:6px;
+  background:linear-gradient(135deg,#efece4,#e2ddd2); height:84px;
+  display:grid; place-items:center; color:#9a9486; font-size:10px; overflow:hidden;
+}
+.presta-row .photo svg{width:30px;height:30px;opacity:.8}
+.presta-row.has-photo{border-color:#ece6d8; background:#fcfaf5; border-radius:8px}
+.sheet .foot{margin-top:26px; border-top:1px solid #ccc; padding-top:6px; font-size:8.5px; text-align:center; color:#555; line-height:1.5}
+.sheet .foot b{color:#222}
+
+/* alignment note */
+.align-note{
+  display:flex; gap:10px; align-items:flex-start; font-size:12px;
+  background:#fbf6ec; border:1px solid var(--gold-soft); border-radius:9px; padding:11px 13px; margin-top:12px;
+}
+.align-note svg{flex:0 0 18px; width:18px; height:18px; color:var(--gold)}
+
+.legend{font-size:11.5px; color:#8c877c; margin-top:14px; line-height:1.6}
+.legend b{color:var(--ink-soft)}
+.tag-sim{color:var(--warn); font-weight:700}
+.tag-live{color:var(--ok); font-weight:700}
+
+.hidden{display:none !important}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="mark">MARIE&nbsp;<b>EUGÉNIE</b></span>
+    <span class="sub">DevisFlow</span>
+  </div>
+  <span class="demo-pill">Démo · maquette UX</span>
+</div>
+
+<div class="shell">
+
+  <!-- ============ LEFT : FORM ============ -->
+  <div class="panel">
+
+    <!-- Type de devis -->
+    <div class="type-switch" id="type-switch">
+      <button data-type="recurrent" class="active">
+        Devis récurrent
+        <span class="k">Contrat · base « Copro Petite »</span>
+      </button>
+      <button data-type="ponctuel">
+        Devis ponctuel
+        <span class="k">Forfait · base « Encombrants »</span>
+      </button>
+    </div>
+
+    <!-- Client + références -->
+    <div class="card">
+      <div class="card__head"><span class="idx">1</span><h3>Client &amp; références</h3></div>
+      <div class="card__body">
+        <div class="grid2">
+          <div class="field"><label>Numéro de devis</label><input id="f-num" value="ME-6245"></div>
+          <div class="field"><label>Date d'émission</label><input id="f-date" value="19 juin 2026"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Civilité + contact</label><input id="f-d1" value="Madame Sophie MARCHAND"></div>
+          <div class="field"><label>Raison sociale</label><input id="f-d2" value="Syndic Foncia Marseille"></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Adresse</label><input id="f-d3" value="12 rue Paradis"></div>
+          <div class="field"><label id="lab-d4">CP + Ville / e-mail contact</label><input id="f-d4" value="s.marchand@foncia.fr"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bloc spécifique récurrent -->
+    <div class="card" id="card-site">
+      <div class="card__head"><span class="idx">2</span><h3 id="head-2">Site &amp; contrat</h3></div>
+      <div class="card__body">
+        <div class="grid2 rec-only">
+          <div class="field"><label>Adresse du site</label><input id="f-site" value="52 rue Louis Astruc"></div>
+          <div class="field"><label>CP + Ville du site</label><input id="f-sitecp" value="13005 Marseille"></div>
+        </div>
+        <div class="grid2 rec-only">
+          <div class="field"><label>Date de prise d'effet</label><input id="f-effet" value="1er juillet 2026"></div>
+          <div class="field"><label>Durée du contrat</label><input id="f-duree" value="1 an"></div>
+        </div>
+        <div class="field pon-only hidden"><label>Type de prestation</label>
+          <input id="f-type" value="Évacuation &amp; traitement des encombrants"></div>
+        <div class="field pon-only hidden"><label>Nom de l'opportunité / résidence</label>
+          <input id="f-opp" value="Résidence Le Prado"></div>
+      </div>
+    </div>
+
+    <!-- Prestations -->
+    <div class="card">
+      <div class="card__head"><span class="idx">3</span><h3>Prestations &amp; tarification</h3></div>
+      <div class="card__body">
+        <p class="help" style="margin:0 0 8px">Heures × agents × taux horaire × coefficient de technicité + frais → HT / TVA / TTC. Calcul en temps réel.</p>
+        <table class="lignes">
+          <thead>
+            <tr>
+              <th>Prestation</th><th>Heures</th><th>Agents</th><th>Taux €/h</th>
+              <th>Technicité</th><th>Frais €</th><th>TVA</th><th class="pon-only hidden">Photo</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="lignes-body"></tbody>
+        </table>
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap">
+          <button class="btn btn--ghost btn--sm" id="btn-add">+ Ajouter une prestation</button>
+        </div>
+
+        <!-- Fréquences (récurrent) -->
+        <div class="rec-only" style="margin-top:16px">
+          <div class="field"><label>Options comparatives à présenter</label></div>
+          <div class="freqs" id="freqs">
+            <label class="on"><input type="checkbox" value="1" checked hidden>1×/semaine</label>
+            <label class="on"><input type="checkbox" value="2" checked hidden>2×/semaine</label>
+            <label class="on"><input type="checkbox" value="3" checked hidden>3×/semaine</label>
+            <label><input type="checkbox" value="4" hidden>4×/semaine</label>
+            <label><input type="checkbox" value="5" hidden>5×/semaine</label>
+          </div>
+          <p class="help" style="margin-top:6px">Le tableau financier affichera une option par fréquence cochée, chiffrée au mois.</p>
+        </div>
+
+        <!-- Totals -->
+        <div class="totals">
+          <div class="t"><span class="lab" id="lab-ht">Total HT</span><span class="val" id="t-ht">—</span></div>
+          <div class="sep"></div>
+          <div class="t"><span class="lab">TVA</span><span class="val" id="t-tva">—</span></div>
+          <div class="sep"></div>
+          <div class="t ttc"><span class="lab">TTC</span><span class="val" id="t-ttc">—</span></div>
+          <div class="override">
+            <label class="help">Forcer le total HT (option)</label>
+            <input id="f-force" placeholder="vide = calcul auto">
+            <span id="auto-flag" class="badge-auto">prix calculé automatiquement</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Équipements / photos (mockup phase 2) -->
+    <div class="card pon-only hidden">
+      <div class="card__head"><span class="idx">4</span><h3>Équipements &amp; photos <span class="help" style="font-weight:400">— maquette phase 2</span></h3></div>
+      <div class="card__body">
+        <p class="help" style="margin:0 0 10px">Sélectionnez un équipement pour l'associer à une prestation : sa photo apparaîtra <b>à droite de la prestation</b>, alignée avec son texte.</p>
+        <div class="equip-grid" id="equip-grid"></div>
+        <div style="margin-top:12px; display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+          <select id="equip-target" class="field" style="padding:8px; border:1px solid #d8d3c8; border-radius:7px"></select>
+          <button class="btn btn--gold btn--sm" id="btn-add-photo">Ajouter la photo à la prestation</button>
+          <span class="help" id="equip-hint">Choisissez un équipement puis la prestation cible.</span>
+        </div>
+
+        <div class="align-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20" stroke-linecap="round"/></svg>
+          <div><b>Correction de l'alignement.</b> Dans la maquette, la photo est posée dans la même ligne que la prestation (tableau invisible 2 colonnes) : elle reste alignée à son texte et ne « remonte » plus en haut de page. C'est l'approche prévue pour la phase 2.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center">
+      <button class="btn" id="btn-generate">Générer le devis (.docx + .pdf)</button>
+      <span class="help" id="gen-note"></span>
+    </div>
+
+    <div class="legend">
+      <b>Ce qui est simulé / branché :</b><br>
+      <span class="tag-live">EN DIRECT</span> calcul des prix, options comparatives, aperçu du document, bascule récurrent/ponctuel — la logique de prix reproduit fidèlement <code>pricing.py</code> du backend.<br>
+      <span class="tag-sim">SIMULÉ</span> la bibliothèque d'équipements et l'injection de photos (maquette visuelle de la phase 2). Le bouton « Générer » est inactif dans cette démo : dans l'application il appelle l'API et produit les vrais fichiers Word/PDF.
+    </div>
+  </div>
+
+  <!-- ============ RIGHT : LIVE PREVIEW ============ -->
+  <div class="preview-wrap">
+    <div class="preview-toolbar">
+      <span class="dot"></span><span class="lab">Aperçu du rendu — mis à jour en direct</span>
+    </div>
+    <div class="paper-scroll">
+      <div class="sheet" id="sheet"><!-- filled by JS --></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* =====================================================================
+   Logique de démonstration
+   Le calcul reproduit backend/pricing.py :
+     HT_passage = h × agents × taux × coef_technicite + frais
+     récurrent  → HT_mensuel = HT_passage × passages/mois
+     ponctuel   → HT = somme des lignes
+   ===================================================================== */
+const SEM_PAR_MOIS = 52/12;
+const TECH = {standard:1.00, technique:1.15, haute:1.30, exceptionnelle:1.50};
+const TVA = 0.20;
+
+const EQUIPMENTS = [
+  {code:"autolaveuse", name:"Autolaveuse", cat:"machine"},
+  {code:"monobrosse", name:"Monobrosse", cat:"machine"},
+  {code:"injecteur", name:"Injecteur-extracteur", cat:"machine"},
+  {code:"hp", name:"Nettoyeur haute pression", cat:"machine"},
+  {code:"aspirateur", name:"Aspirateur eau & poussière", cat:"matériel"},
+  {code:"benne", name:"Camion benne", cat:"véhicule"},
+  {code:"utilitaire", name:"Véhicule utilitaire", cat:"véhicule"},
+  {code:"echafaudage", name:"Échafaudage roulant", cat:"matériel"},
+];
+
+let state = {
+  type:"recurrent",
+  lignes:[],
+  selectedEquip:null,
+};
+
+/* ---------- helpers ---------- */
+const $ = s=>document.querySelector(s);
+const $$ = s=>document.querySelectorAll(s);
+function euros(n){
+  return n.toLocaleString("fr-FR",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+}
+const machineSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="14" height="11" rx="2"/><circle cx="7" cy="20" r="1.6"/><circle cx="14" cy="20" r="1.6"/><path d="M17 10h3l1 4h-4z"/></svg>`;
+
+/* ---------- prestation lines ---------- */
+function defaultLignes(type){
+  if(type==="recurrent"){
+    return [{libelle:"Entretien des parties communes", h:2, agents:1, taux:24, tech:"standard", frais:0, tva:0.20, photo:null}];
+  }
+  return [
+    {libelle:"Affichage et information des résidents", h:0.5, agents:1, taux:26, tech:"standard", frais:0, tva:0.20, photo:null},
+    {libelle:"Débarras des encombrants des caves", h:5, agents:2, taux:28, tech:"technique", frais:0, tva:0.20, photo:"benne"},
+    {libelle:"Chargement et transport en centre agréé", h:2, agents:2, taux:28, tech:"standard", frais:150, tva:0.20, photo:null},
+    {libelle:"Traitement et balayage final", h:1, agents:1, taux:26, tech:"standard", frais:0, tva:0.20, photo:null},
+  ];
+}
+
+function lineCalc(l, recurrent, freqPerWeek){
+  const coef = TECH[l.tech] ?? 1;
+  const passage = (l.h*l.agents*l.taux*coef) + Number(l.frais||0);
+  let ht;
+  if(recurrent){
+    const perMonth = (freqPerWeek!=null ? freqPerWeek : 1) * SEM_PAR_MOIS;
+    ht = passage * perMonth;
+  } else {
+    ht = passage;
+  }
+  const tva = ht * (l.tva ?? TVA);
+  return {ht, tva, ttc:ht+tva, passage};
+}
+
+function totals(){
+  const recurrent = state.type==="recurrent";
+  let ht=0, tva=0;
+  state.lignes.forEach(l=>{
+    const c = lineCalc(l, recurrent, recurrent?1:null); // base 1x/sem for the running total
+    ht+=c.ht; tva+=c.tva;
+  });
+  const force = $("#f-force").value.trim();
+  let override=false;
+  if(force!==""){ override=true; ht=parseFloat(force.replace(",","."))||0; tva=ht*TVA; }
+  return {ht, tva, ttc:ht+tva, override};
+}
+
+function selectedFreqs(){
+  return Array.from($$("#freqs input:checked")).map(c=>Number(c.value)).sort((a,b)=>a-b);
+}
+
+/* ---------- render form lines ---------- */
+function renderLignes(){
+  const body = $("#lignes-body");
+  const pon = state.type==="ponctuel";
+  body.innerHTML = state.lignes.map((l,i)=>`
+    <tr data-i="${i}">
+      <td><input class="li-lib" value="${l.libelle.replaceAll('"','&quot;')}"></td>
+      <td><input class="li-h num" type="number" min="0" step="0.25" value="${l.h}"></td>
+      <td><input class="li-a nar" type="number" min="1" step="1" value="${l.agents}"></td>
+      <td><input class="li-t num" type="number" min="0" step="0.5" value="${l.taux}"></td>
+      <td><select class="li-tech">${Object.keys(TECH).map(t=>`<option ${t===l.tech?"selected":""}>${t}</option>`).join("")}</select></td>
+      <td><input class="li-f num" type="number" min="0" step="1" value="${l.frais}"></td>
+      <td><select class="li-tva nar">
+        <option value="0.20" ${l.tva===0.20?"selected":""}>20%</option>
+        <option value="0.10" ${l.tva===0.10?"selected":""}>10%</option>
+      </select></td>
+      ${pon?`<td class="row-photo-tag">${l.photo?("📷 "+(EQUIPMENTS.find(e=>e.code===l.photo)?.name||"")):"—"}</td>`:""}
+      <td><button class="btn-x" title="Supprimer">×</button></td>
+    </tr>`).join("");
+
+  body.querySelectorAll("tr").forEach(tr=>{
+    const i=+tr.dataset.i;
+    tr.querySelector(".li-lib").oninput=e=>{state.lignes[i].libelle=e.target.value; renderPreview();};
+    tr.querySelector(".li-h").oninput=e=>{state.lignes[i].h=+e.target.value; refresh();};
+    tr.querySelector(".li-a").oninput=e=>{state.lignes[i].agents=+e.target.value; refresh();};
+    tr.querySelector(".li-t").oninput=e=>{state.lignes[i].taux=+e.target.value; refresh();};
+    tr.querySelector(".li-tech").onchange=e=>{state.lignes[i].tech=e.target.value; refresh();};
+    tr.querySelector(".li-f").oninput=e=>{state.lignes[i].frais=+e.target.value; refresh();};
+    tr.querySelector(".li-tva").onchange=e=>{state.lignes[i].tva=+e.target.value; refresh();};
+    tr.querySelector(".btn-x").onclick=()=>{state.lignes.splice(i,1); refresh();};
+  });
+  refreshEquipTarget();
+}
+
+/* ---------- equipment mockup ---------- */
+function renderEquip(){
+  $("#equip-grid").innerHTML = EQUIPMENTS.map(e=>`
+    <div class="equip ${state.selectedEquip===e.code?"sel":""}" data-code="${e.code}">
+      <div class="thumb">${machineSVG}</div>
+      <div class="name">${e.name}</div>
+      <div class="cat">${e.cat}</div>
+    </div>`).join("");
+  $$("#equip-grid .equip").forEach(el=>{
+    el.onclick=()=>{ state.selectedEquip=el.dataset.code; renderEquip(); };
+  });
+}
+function refreshEquipTarget(){
+  const sel=$("#equip-target"); if(!sel) return;
+  sel.innerHTML = state.lignes.map((l,i)=>`<option value="${i}">${l.libelle||("Prestation "+(i+1))}</option>`).join("");
+}
+
+/* ---------- preview (A4) ---------- */
+function previewRecurrent(){
+  const freqs = selectedFreqs();
+  const freqLabel = {1:"1 fois par semaine",2:"2 fois par semaine",3:"3 fois par semaine",4:"4 fois par semaine",5:"5 fois par semaine"};
+  const base = state.lignes[0] || {h:0,agents:1,taux:0,tech:"standard",frais:0,tva:0.20};
+  const rows = freqs.map((f,idx)=>{
+    const c = lineCalc(base, true, f);
+    return `<tr>
+      <td class="lib">Option ${idx+1} : ${freqLabel[f]}</td>
+      <td class="ht">${euros(c.ht)}</td><td>${euros(c.tva)}</td><td class="ttc">${euros(c.ttc)}</td>
+    </tr>`;
+  }).join("");
+
+  const freqRow = id => `<span class="freqline">Fréquence : ${id} fois / semaine</span>`;
+  return `
+    <div class="mehead"><div class="logo">MARIE-EUGÉNIE<small>DEPUIS 1975</small></div><div class="assoc">Nettoyage &amp; Services Associés</div></div>
+    <div class="meta-date">Marseille, le ${val("f-date")}</div>
+    <div class="dest">${val("f-d1")}<br><span class="soft">${val("f-d2")}<br>${val("f-d3")}<br>${val("f-d4")}</span></div>
+    <div class="title">Proposition ${val("f-num")}</div>
+    <div class="subtitle">Entretien des parties communes</div>
+    <div class="subtitle">situées au</div>
+    <div class="site">${val("f-site")}<br>${val("f-sitecp")}</div>
+
+    <h4>2 · Détail &amp; fréquences des prestations</h4>
+    <div><b>Hall d'entrée</b> ${freqRow(2)}</div>
+    <div><b>Cages d'escaliers &amp; paliers</b> ${freqRow(1)}</div>
+    <div><b>Caves &amp; descentes garage</b> ${freqRow(1)}</div>
+
+    <h4>5 · Proposition financière</h4>
+    <table class="fin-table">
+      <thead><tr><th>Entretien des parties communes</th><th>Prix mensuel HT</th><th>TVA</th><th>Prix mensuel TTC</th></tr></thead>
+      <tbody>${rows||`<tr><td class="lib">Aucune option cochée</td><td>—</td><td>—</td><td>—</td></tr>`}</tbody>
+    </table>
+
+    <h4>6 · Date de prise d'effet &amp; durée</h4>
+    <div>Le présent contrat prend effet au : <b>${val("f-effet")}</b></div>
+    <div>La durée du contrat est de <b>${val("f-duree")}</b> renouvelable.</div>
+
+    ${footer("SAS")}
+  `;
+}
+
+function previewPonctuel(){
+  const t = totals();
+  const lignesHTML = state.lignes.map(l=>{
+    const eq = l.photo ? EQUIPMENTS.find(e=>e.code===l.photo) : null;
+    return `<div class="presta-row ${eq?"has-photo":""}">
+      <div class="txt">• ${l.libelle||"<i>prestation</i>"}</div>
+      ${eq?`<div class="photo">${machineSVG}<span style="position:absolute"></span></div>`:""}
+    </div>`;
+  }).join("");
+
+  return `
+    <div class="mehead"><div class="logo">MARIE-EUGÉNIE<small>DEPUIS 1975</small></div><div class="assoc">Nettoyage &amp; Services Associés</div></div>
+    <div class="meta-date">Marseille, le ${val("f-date")}</div>
+    <div class="dest">${val("f-d1")}<br><span class="soft">${val("f-d2")}<br>${val("f-d3")}</span></div>
+    <div class="title" style="text-decoration:underline">Devis ${val("f-num")}</div>
+    <div class="subtitle">${val("f-type")}</div>
+    <div class="subtitle">au</div>
+    <div class="site">${val("f-opp")}</div>
+
+    <h4>1 · Détail des prestations</h4>
+    ${lignesHTML}
+
+    <h4>2 · Proposition financière</h4>
+    <table class="fin-table">
+      <thead><tr><th></th><th>Tarif € HT</th><th>TVA 20%</th><th>Tarif € TTC</th></tr></thead>
+      <tbody><tr>
+        <td class="lib">Forfait enlèvement, chargement, transport et traitement</td>
+        <td class="ht">${euros(t.ht)}</td><td>${euros(t.tva)}</td><td class="ttc">${euros(t.ttc)}</td>
+      </tr></tbody>
+    </table>
+
+    <div style="color:#b42318;font-weight:700;margin-top:8px">Compte tenu de l'évolution potentielle des dépôts, le devis est valable 15 jours.</div>
+    ${footer("SARL")}
+  `;
+}
+
+function footer(forme){
+  return `<div class="foot">
+    <b>${forme} Marie-Eugénie</b> au Capital de 5000 € · 1 rue Raspail – 13004 Marseille<br>
+    Tél <b>04 91 47 14 38</b> · N° Siret : 521 797 258 · code APE n°8121 Z<br>
+    <b>contact@marie-eugenie.fr</b> &nbsp;·&nbsp; <b>www.Marie-Eugenie.fr</b>
+  </div>`;
+}
+
+function val(id){ const el=document.getElementById(id); return el?el.value:""; }
+
+function renderPreview(){
+  $("#sheet").innerHTML = state.type==="recurrent" ? previewRecurrent() : previewPonctuel();
+}
+
+/* ---------- totals + flag ---------- */
+function renderTotals(){
+  const t = totals();
+  $("#t-ht").textContent = euros(t.ht);
+  $("#t-tva").textContent = euros(t.tva);
+  $("#t-ttc").textContent = euros(t.ttc);
+  const flag = $("#auto-flag");
+  if(t.override){ flag.textContent="prix forcé manuellement"; flag.className="badge-over"; }
+  else { flag.textContent="prix calculé automatiquement"; flag.className="badge-auto"; }
+}
+
+function refresh(){ renderLignes(); renderTotals(); renderPreview(); }
+/* renderLignes rebuilds inputs, so we keep focus-friendly refresh for value-only changes: */
+function refreshLight(){ renderTotals(); renderPreview(); }
+
+/* ---------- type switching ---------- */
+function setType(type){
+  state.type = type;
+  state.lignes = defaultLignes(type);
+  state.selectedEquip = null;
+  // toggle UI
+  $$("#type-switch button").forEach(b=>b.classList.toggle("active", b.dataset.type===type));
+  const rec = type==="recurrent";
+  $$(".rec-only").forEach(e=>e.classList.toggle("hidden", !rec));
+  $$(".pon-only").forEach(e=>e.classList.toggle("hidden", rec));
+  $("#head-2").textContent = rec ? "Site & contrat" : "Prestation & opportunité";
+  $("#lab-d4").textContent = rec ? "E-mail / contact" : "CP + Ville";
+  $("#lab-ht").textContent = rec ? "Total HT (base 1×/sem)" : "Total HT (forfait)";
+  // sensible defaults per type
+  if(rec){ $("#f-num").value="ME-6245"; } else { $("#f-num").value="ME-7012"; }
+  refresh();
+  renderEquip();
+}
+
+/* ---------- wire static controls ---------- */
+$("#type-switch").addEventListener("click", e=>{
+  const b=e.target.closest("button"); if(b) setType(b.dataset.type);
+});
+$("#btn-add").addEventListener("click", ()=>{
+  state.lignes.push({libelle:"Nouvelle prestation", h:1, agents:1, taux:24, tech:"standard", frais:0, tva:0.20, photo:null});
+  refresh();
+});
+$("#freqs").addEventListener("click", e=>{
+  const lab=e.target.closest("label"); if(!lab) return;
+  const cb=lab.querySelector("input"); cb.checked=!cb.checked;
+  lab.classList.toggle("on", cb.checked);
+  refreshLight();
+});
+["f-num","f-date","f-d1","f-d2","f-d3","f-d4","f-site","f-sitecp","f-effet","f-duree","f-type","f-opp"]
+  .forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener("input", refreshLight); });
+$("#f-force").addEventListener("input", refreshLight);
+
+$("#btn-add-photo").addEventListener("click", ()=>{
+  if(!state.selectedEquip){ $("#equip-hint").textContent="Sélectionnez d'abord un équipement ci-dessus."; return; }
+  const i = +$("#equip-target").value;
+  if(state.lignes[i]){
+    state.lignes[i].photo = state.selectedEquip;
+    const name = EQUIPMENTS.find(e=>e.code===state.selectedEquip)?.name;
+    $("#equip-hint").textContent = `Photo « ${name} » associée à : ${state.lignes[i].libelle}`;
+    refresh();
+  }
+});
+$("#btn-generate").addEventListener("click", ()=>{
+  $("#gen-note").textContent = "Démo : dans l'application, ce bouton produit les vrais fichiers .docx + .pdf via l'API.";
+});
+
+/* ---------- boot ---------- */
+setType("recurrent");
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-docx==1.1.2
+docxtpl==0.20.2
+Pillow==10.4.0
+pillow-heif==0.18.0
+sqlmodel==0.0.22
+python-multipart==0.0.12
+jinja2==3.1.4
+aiofiles==24.1.0

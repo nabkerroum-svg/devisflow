@@ -1,0 +1,114 @@
+[
+  {
+    "code": "hall",
+    "titre": "Hall d'Entrée",
+    "freq_var": "FREQ_HALL",
+    "operations": [
+      "Nettoyage des marches et contremarches d’accès au hall d’entrée",
+      "Nettoyage des vitres (intérieur / extérieur) et des encadrements de la porte d’entrée à hauteur d’Homme",
+      "Nettoyage des plaques de sonnerie",
+      "Nettoyage des cuivres",
+      "Dépoussiérage du paillasson",
+      "Nettoyage de la porte à tambour",
+      "Balayage des sols du hall d’entrée",
+      "Lavage des sols à l’aide d’un produit détergent et odorant",
+      "Dépoussiérage des plinthes",
+      "Enlèvement des toiles d’araignée",
+      "Nettoyage des boites aux lettres",
+      "Vidage corbeille",
+      "Nettoyage des interrupteurs"
+    ]
+  },
+  {
+    "code": "ascenseur",
+    "titre": "Nettoyage de la cabine d'ascenseur",
+    "freq_var": "FREQ_ASCENSEUR",
+    "operations": [
+      "Nettoyage des sols",
+      "Nettoyage des parois",
+      "Nettoyage des plaques de commande",
+      "Nettoyage des rails d’ascenseur",
+      "Nettoyage des miroirs",
+      "Nettoyage des portes d’ascenseur"
+    ]
+  },
+  {
+    "code": "escaliers",
+    "titre": "Cages d'escaliers et paliers",
+    "freq_var": "FREQ_ESCALIERS",
+    "operations": [
+      "Balayage et lavage des marches et contremarches",
+      "Dépoussiérage des plinthes, barreaudages et main courante",
+      "Enlèvement des toiles d’araignée",
+      "Balayage des sols",
+      "Lavage des sols à l’aide d’un produit détergent et odorant",
+      "Nettoyage des portes d’ascenseur de chaque palier",
+      "Nettoyage des rails d’ascenseur de chaque palier",
+      "Nettoyage des interrupteurs",
+      "Nettoyage des fenêtres des paliers"
+    ]
+  },
+  {
+    "code": "caves",
+    "titre": "Caves et descentes garage",
+    "freq_var": "FREQ_CAVES",
+    "operations": [
+      "Balayage et lavage des marches et contremarches des accès aux caves et garages",
+      "Dépoussiérage des plinthes",
+      "Enlèvement des toiles d’araignée",
+      "Balayage des sols des sas d’accès au garage",
+      "Lavage des sols à l’aide d’un produit détergent et odorant",
+      "Nettoyage des portes d’ascenseur d’accès au garage",
+      "Nettoyage des rails d’ascenseur",
+      "Nettoyage des boutons de minuterie",
+      "Dépoussiérage des luminaires",
+      "Balayage et lavage des couloirs de caves"
+    ]
+  },
+  {
+    "code": "garage",
+    "titre": "Garage",
+    "freq_var": "FREQ_GARAGE",
+    "operations": [
+      "Enlèvement des détritus",
+      "Enlèvement des éventuels détritus dans les bacs à sable pour la protection incendie",
+      "Dépoussiérage des extincteurs",
+      "Enlèvement des toiles d’araignée",
+      "Balayage des sols",
+      "Enlèvement des détritus et des feuilles de la voie d'accès aux garages"
+    ]
+  },
+  {
+    "code": "abords",
+    "titre": "Abords & accès",
+    "freq_var": "FREQ_ABORDS",
+    "operations": [
+      "Enlèvement des feuilles mortes aux abords de la copropriété",
+      "Enlèvement des détritus aux abords de la copropriété",
+      "Balayage des abords de la copropriété"
+    ]
+  },
+  {
+    "code": "conteneur",
+    "titre": "Local conteneur / vide ordure",
+    "freq_var": "FREQ_CONTENEUR",
+    "operations": [
+      "Enlèvement des détritus",
+      "Balayage des sols du local",
+      "Lavage des sols avec un produit bactéricide, fongicide et surodorant",
+      "Lavage des conteneurs avec un produit bactéricide, fongicide et surodorant",
+      "Enlèvement des toiles d’araignée"
+    ]
+  },
+  {
+    "code": "om",
+    "titre": "Ordures Ménagères",
+    "freq_var": "FREQ_OM",
+    "operations": [
+      "Sortie des conteneurs",
+      "Sortie des sacs",
+      "Enlèvement des détritus au sol",
+      "Rentrée des conteneurs"
+    ]
+  }
+]

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+backend/storage/db/
+backend/storage/generated/
+backend/storage/templates/
+.env
+.DS_Store

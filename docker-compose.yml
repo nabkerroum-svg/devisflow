@@ -1,0 +1,14 @@
+version: "3.9"
+services:
+  devisflow:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Monte le CODE en direct : frontend et backend toujours à jour, même sans
+      # reconstruire l'image. Évite de tester une ancienne version mise en cache.
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1

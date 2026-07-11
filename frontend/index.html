@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevisFlow — Marie Eugénie</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-header__brand">
+      <div class="logo-mark">M·E</div>
+      <div>
+        <div class="app-header__title">DevisFlow</div>
+        <div class="app-header__sub">Génération de devis Marie Eugénie</div>
+      </div>
+    </div>
+    <nav class="app-nav">
+      <button class="nav-tab is-active" data-view="creation">Créer un devis</button>
+      <button class="nav-tab" data-view="devis-list">Mes devis</button>
+      <button class="nav-tab" data-view="templates">Modèles PDF</button>
+    </nav>
+  </header>
+
+  <main class="app-main">
+
+    <!-- =============================================== -->
+    <!-- VUE : Création d'un devis                       -->
+    <!-- =============================================== -->
+    <section class="view is-active" id="view-creation">
+      <div class="view__header">
+        <h1>Créer un devis</h1>
+        <p>Remplissez les zones variables. Le reste du document (logos, certifications, mentions, charte) sera repris à l'identique du modèle maître.</p>
+      </div>
+
+      <div class="form-grid">
+        <div class="card">
+          <div class="card__title">Modèle à utiliser</div>
+          <div class="form-group">
+            <label>Modèle de devis</label>
+            <select id="f-template-code"></select>
+            <div class="hint" id="f-template-hint">— variables détectées</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__title">Références du devis</div>
+          <div class="form-group">
+            <label>Numéro de devis *</label>
+            <input id="f-numero" placeholder="ME-6245" value="ME-6245">
+          </div>
+          <div class="form-group">
+            <label>Date d'émission</label>
+            <input id="f-date-emission" placeholder="18 juin 2026">
+          </div>
+          <div class="form-group">
+            <label>Type de prestation</label>
+            <input id="f-type-prestation" placeholder="Entretien des parties communes" value="Entretien des parties communes">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__title">Destinataire</div>
+          <div class="form-group">
+            <label>Ligne 1 — Civilité + Contact</label>
+            <input id="f-dest1" placeholder="Madame Sophie MARCHAND">
+          </div>
+          <div class="form-group">
+            <label>Ligne 2 — Raison sociale</label>
+            <input id="f-dest2" placeholder="Syndic Foncia Marseille">
+          </div>
+          <div class="form-group">
+            <label>Ligne 3 — Adresse</label>
+            <input id="f-dest3" placeholder="12 rue Paradis">
+          </div>
+          <div class="form-group">
+            <label>Ligne 4 — CP + Ville</label>
+            <input id="f-dest4" placeholder="13001 Marseille">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card__title">Site d'intervention</div>
+          <div class="form-group">
+            <label>Adresse du site</label>
+            <input id="f-site-adresse" placeholder="52 rue Louis Astruc">
+          </div>
+          <div class="form-group">
+            <label>Code postal + Ville du site</label>
+            <input id="f-site-cp-ville" placeholder="13005 Marseille">
+          </div>
+        </div>
+        <div class="card card--wide">
+          <div class="card__title">Prestations &amp; tarification automatique</div>
+          <p class="hint">Renseignez les lignes : le prix HT / TVA / TTC est calculé automatiquement (heures × agents × taux × technicité + frais). Vous pourrez forcer le total manuellement.</p>
+          <table class="lignes-table" id="lignes-table">
+            <thead>
+              <tr>
+                <th>Prestation</th><th>Heures</th><th>Agents</th><th>Taux €/h</th>
+                <th>Technicité</th><th>Frais €</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="lignes-body"></tbody>
+          </table>
+          <button class="btn btn--sm" id="btn-add-ligne" type="button">+ Ajouter une prestation</button>
+
+          <div class="form-group" id="freq-options-group" style="margin-top:14px;">
+            <label>Options comparatives (devis récurrent)</label>
+            <div class="freq-checks">
+              <label><input type="checkbox" class="freq-opt" value="1/semaine" checked> 1×/sem</label>
+              <label><input type="checkbox" class="freq-opt" value="2/semaine" checked> 2×/sem</label>
+              <label><input type="checkbox" class="freq-opt" value="3/semaine" checked> 3×/sem</label>
+              <label><input type="checkbox" class="freq-opt" value="4/semaine"> 4×/sem</label>
+              <label><input type="checkbox" class="freq-opt" value="5/semaine"> 5×/sem</label>
+            </div>
+            <div class="hint">Le tableau financier affichera une ligne par fréquence cochée, chiffrée automatiquement.</div>
+          </div>
+
+          <div class="pricing-preview" id="pricing-preview">
+            <div class="form-group" style="max-width:240px;">
+              <label>Forcer le total HT (optionnel)</label>
+              <input id="f-prix-force" placeholder="laisser vide = calcul auto">
+            </div>
+            <div class="totaux" id="totaux-preview">
+              <span>HT : <strong id="t-ht">—</strong></span>
+              <span>TVA : <strong id="t-tva">—</strong></span>
+              <span>TTC : <strong id="t-ttc">—</strong></span>
+              <button class="btn btn--sm" id="btn-recalc" type="button">Recalculer</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions-bar">
+        <button class="btn btn--primary" id="btn-generer">Générer le devis</button>
+        <span class="hint" id="gen-status"></span>
+      </div>
+    </section>
+
+    <!-- =============================================== -->
+    <!-- VUE : Mes devis                                 -->
+    <!-- =============================================== -->
+    <section class="view" id="view-devis-list">
+      <div class="view__header">
+        <h1>Devis générés</h1>
+        <p>Téléchargez les fichiers .docx et .pdf de chaque devis produit.</p>
+      </div>
+      <div class="card">
+        <table class="listing-table" id="devis-table">
+          <thead>
+            <tr>
+              <th>Numéro</th>
+              <th>Date</th>
+              <th>Client</th>
+              <th>Site</th>
+              <th>Modèle</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- =============================================== -->
+    <!-- VUE : Modèles PDF (back-office)                 -->
+    <!-- =============================================== -->
+    <section class="view" id="view-templates">
+      <div class="view__header">
+        <h1>Modèles PDF / Word</h1>
+        <p>Importez vos documents de référence (.docx). Ils deviennent les modèles maîtres utilisés pour la génération.
+           Le système conserve à l'identique mise en page, logos, certifications, polices, marges et n'intervient que sur les zones variables marquées <code>{{ VARIABLE }}</code>.</p>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Importer un nouveau modèle</div>
+        <form id="form-upload-template" class="form-grid form-grid--inline">
+          <div class="form-group">
+            <label>Fichier .docx *</label>
+            <input type="file" id="upload-file" accept=".docx,.doc" required>
+          </div>
+          <div class="form-group">
+            <label>Code unique *</label>
+            <input id="upload-code" placeholder="bureaux_petit" required>
+          </div>
+          <div class="form-group">
+            <label>Nom affiché *</label>
+            <input id="upload-nom" placeholder="Bureaux — petite surface" required>
+          </div>
+          <div class="form-group">
+            <label>Famille</label>
+            <select id="upload-famille">
+              <option value="contrat">Contrat (récurrent)</option>
+              <option value="ponctuel">Ponctuel</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Type d'intervention</label>
+            <input id="upload-type" placeholder="Entretien des parties communes">
+          </div>
+          <div class="form-group form-group--checkbox">
+            <label>
+              <input type="checkbox" id="upload-annoter">
+              Annoter automatiquement (remplace les zones classiques par des marqueurs)
+            </label>
+            <div class="hint">Cochez si votre fichier .docx n'a pas encore été annoté avec des marqueurs <code>{{ VARIABLE }}</code>.
+            Le système remplacera automatiquement les zones standard (date, destinataire, numéro, adresse site).</div>
+          </div>
+          <div class="form-group">
+            <button type="submit" class="btn btn--primary">Importer le modèle</button>
+          </div>
+        </form>
+        <div class="hint" id="upload-status"></div>
+      </div>
+
+      <div class="card">
+        <div class="card__title">Modèles enregistrés</div>
+        <table class="listing-table" id="templates-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Nom</th>
+              <th>Famille</th>
+              <th>Type intervention</th>
+              <th>Variables</th>
+              <th>Statut</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
