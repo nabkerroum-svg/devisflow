@@ -2320,7 +2320,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 continue
             label = norm(str(ph.get("libelle", "") or ph.get("prestation", "")))
             detected = detect_zone_code(label)
-            if not label or detected is None or detected in visible_codes:
+            if detected in visible_codes:
                 kept.append(ph)
         return kept
 
@@ -2620,7 +2620,205 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
     _aligner_depart_pages_copro(output_path)
     _injecter_photos(output_path, photos)
     _supprimer_rouge_document(output_path)
+    _verrouiller_page_prestations_complementaires_copro(output_path)
     return output_path
+
+
+def _verrouiller_page_prestations_complementaires_copro(docx_path: Path) -> None:
+    """Verrouille la page fixe "3 - Prestations complementaires" de copro_petite.
+
+    Cette passe est volontairement executee apres les remplacements et l'injection
+    des photos : les prestations/photos dynamiques ne doivent jamais reutiliser les
+    ancres texte de cette page fixe ni en modifier la pagination interne.
+    """
+    try:
+        from lxml import etree
+    except Exception:
+        return
+
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    qn_w = lambda name: f"{{{ns['w']}}}{name}"
+
+    def norm(txt: str) -> str:
+        import unicodedata
+        txt = (txt or "").lower().replace("\xa0", " ")
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+        txt = re.sub(r"[\W_]+", " ", txt, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", txt).strip()
+
+    def texte_para(p):
+        return "".join(p.xpath(".//w:t/text()", namespaces=ns)).strip()
+
+    def ppr_for(p):
+        ppr = p.find("w:pPr", namespaces=ns)
+        if ppr is None:
+            ppr = etree.Element(qn_w("pPr"))
+            p.insert(0, ppr)
+        return ppr
+
+    def remove_children(ppr, names):
+        for name in names:
+            for node in list(ppr.findall(f"w:{name}", namespaces=ns)):
+                ppr.remove(node)
+
+    def add_flag(ppr, name):
+        if ppr.find(f"w:{name}", namespaces=ns) is None:
+            etree.SubElement(ppr, qn_w(name))
+
+    def remove_hard_page_breaks(p):
+        for br in list(p.xpath('.//w:br[@w:type="page"]', namespaces=ns)):
+            parent = br.getparent()
+            if parent is not None:
+                parent.remove(br)
+
+    def is_lock_spacer(p):
+        if texte_para(p):
+            return False
+        if p.find(".//w:pageBreakBefore", namespaces=ns) is not None:
+            return True
+        texts = p.xpath(".//w:t/text()", namespaces=ns)
+        colors = p.xpath(".//w:color/@w:val", namespaces=ns)
+        sizes = p.xpath(".//w:sz/@w:val", namespaces=ns)
+        return (
+            texts
+            and not any(str(text).strip() for text in texts)
+            and any(str(color).upper() == "FFFFFF" for color in colors)
+            and "24" in sizes
+        )
+
+    def build_spacer(with_page_break=False):
+        spacer = etree.Element(qn_w("p"))
+        spacer_ppr = etree.SubElement(spacer, qn_w("pPr"))
+        if with_page_break:
+            etree.SubElement(spacer_ppr, qn_w("pageBreakBefore"))
+        spacing = etree.SubElement(spacer_ppr, qn_w("spacing"))
+        spacing.set(qn_w("before"), "0")
+        spacing.set(qn_w("after"), "0")
+        run = etree.SubElement(spacer, qn_w("r"))
+        rpr = etree.SubElement(run, qn_w("rPr"))
+        sz = etree.SubElement(rpr, qn_w("sz"))
+        sz.set(qn_w("val"), "24")
+        color = etree.SubElement(rpr, qn_w("color"))
+        color.set(qn_w("val"), "FFFFFF")
+        text = etree.SubElement(run, qn_w("t"))
+        text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        text.text = " "
+        return spacer
+
+    tmp_path = docx_path.with_suffix(".prestcomp.lock.tmp.docx")
+    changed = False
+    with zipfile.ZipFile(docx_path, "r") as zin:
+        with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for info in zin.infolist():
+                data = zin.read(info.filename)
+                if info.filename == "word/document.xml":
+                    root = etree.fromstring(data)
+                    body = root.find("w:body", namespaces=ns)
+                    if body is not None:
+                        children = list(body)
+                        title_idx = None
+                        next_idx = None
+                        for idx, child in enumerate(children):
+                            if child.tag != qn_w("p"):
+                                continue
+                            txt_norm = norm(texte_para(child))
+                            if title_idx is None and "prestations complementaires" in txt_norm:
+                                title_idx = idx
+                                continue
+                            if title_idx is not None and (
+                                "la tracabilite des prestations" in txt_norm
+                                or "proposition financiere" in txt_norm
+                                or "conditions generales" in txt_norm
+                            ):
+                                next_idx = idx
+                                break
+
+                        if title_idx is not None:
+                            title = children[title_idx]
+                            # Retire tous les anciens ancrages immediatement avant la page fixe
+                            # puis les reconstruit de facon idempotente.
+                            previous = title.getprevious()
+                            while previous is not None and is_lock_spacer(previous):
+                                to_remove = previous
+                                previous = previous.getprevious()
+                                body.remove(to_remove)
+                                changed = True
+
+                            refreshed = list(body)
+                            title_idx = refreshed.index(title)
+                            for spacer_idx in range(COPRO_PETITE_PREST_COMP_ANCHOR_LINES):
+                                body.insert(
+                                    title_idx + spacer_idx,
+                                    build_spacer(with_page_break=(spacer_idx == 0)),
+                                )
+                            changed = True
+
+                            refreshed = list(body)
+                            title_idx = refreshed.index(title)
+                            if next_idx is None:
+                                next_idx = len(refreshed)
+                            else:
+                                # Recalcule la fin apres l'insertion des ancrages.
+                                next_idx = None
+                                for idx, child in enumerate(refreshed[title_idx + 1:], start=title_idx + 1):
+                                    if child.tag != qn_w("p"):
+                                        continue
+                                    txt_norm = norm(texte_para(child))
+                                    if (
+                                        "la tracabilite des prestations" in txt_norm
+                                        or "proposition financiere" in txt_norm
+                                        or "conditions generales" in txt_norm
+                                    ):
+                                        next_idx = idx
+                                        break
+                                if next_idx is None:
+                                    next_idx = len(refreshed)
+
+                            block = [
+                                child for child in refreshed[title_idx:next_idx]
+                                if child.tag == qn_w("p")
+                            ]
+                            for pos, paragraph in enumerate(block):
+                                txt_norm = norm(texte_para(paragraph))
+                                ppr = ppr_for(paragraph)
+                                remove_children(ppr, ("pageBreakBefore",))
+                                remove_hard_page_breaks(paragraph)
+                                add_flag(ppr, "keepLines")
+                                remove_children(ppr, ("keepNext",))
+                                if (
+                                    pos < len(block) - 1
+                                    and (
+                                        "prestations complementaires" in txt_norm
+                                        or "deratisation desinsectisation" in txt_norm
+                                        or "relamping changement d ampoules" in txt_norm
+                                    )
+                                ):
+                                    add_flag(ppr, "keepNext")
+                                if ppr.find("w:widowControl", namespaces=ns) is None:
+                                    etree.SubElement(ppr, qn_w("widowControl"))
+
+                            if next_idx < len(refreshed):
+                                next_title = refreshed[next_idx]
+                                if next_title.tag == qn_w("p"):
+                                    previous = next_title.getprevious()
+                                    while previous is not None and is_lock_spacer(previous):
+                                        to_remove = previous
+                                        previous = previous.getprevious()
+                                        body.remove(to_remove)
+                                    next_ppr = ppr_for(next_title)
+                                    remove_children(next_ppr, ("pageBreakBefore",))
+                                    add_flag(next_ppr, "pageBreakBefore")
+                            changed = True
+
+                    if changed:
+                        data = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone="yes")
+                zout.writestr(info, data)
+
+    if changed:
+        shutil.move(tmp_path, docx_path)
+    else:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _aligner_depart_pages_copro(docx_path: Path):
