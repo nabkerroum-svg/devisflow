@@ -60,6 +60,8 @@ PONCTUEL_TEMPLATE_PREFIX = "ponctuel_"
 COPRO_COVER_CONTACT_BLOCK_BEFORE_TWIPS = "720"
 COPRO_COVER_AFTER_CONTACT_LINE_TWIPS = "160"
 COPRO_PETITE_COMPANY_PRESENTATION_START_TWIPS = "40"
+COPRO_PETITE_PREST_COMP_ANCHOR_LINES = 6
+COPRO_PETITE_PREST_COMP_EXTRA_OFFSET_PT = 36
 
 
 def _est_image_logo_entreprise(path: Any) -> bool:
@@ -2322,6 +2324,50 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 kept.append(ph)
         return kept
 
+    def _flag_to_bool(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        return str(value).strip().lower() not in {"0", "false", "faux", "non", "no", "off"}
+
+    def apply_visible_zone_operation_filters():
+        """Supprime les prestations recurrentes decochees dans les blocs fixes Copro."""
+        ranges = find_zone_ranges()
+        for code, (start, end) in ranges.items():
+            if not show_zone(code):
+                continue
+            flags_raw = data.get(f"OPS_ENABLED_{code}")
+            flags = [_flag_to_bool(v) for v in flags_raw] if isinstance(flags_raw, list) else None
+            active_raw = data.get(f"OPS_{code}")
+            active_norms = (
+                {norm(str(op)) for op in active_raw if str(op).strip()}
+                if isinstance(active_raw, list)
+                else None
+            )
+            if flags is None and active_norms is None:
+                continue
+
+            op_index = 0
+            for p in list(doc.paragraphs[start + 1:end + 1]):
+                txt_raw = p.text or ""
+                txt = norm(txt_raw)
+                if not txt:
+                    continue
+                if "frequence" in txt or f"freq {code.lower()}" in txt:
+                    continue
+                keep = True
+                if flags is not None:
+                    if op_index < len(flags):
+                        keep = flags[op_index]
+                    elif active_norms is not None and not active_norms:
+                        keep = False
+                elif active_norms is not None:
+                    keep = txt in active_norms
+                op_index += 1
+                if not keep:
+                    remove_paragraph(p)
+
     def trim_empty_paragraphs_after_selected_zones():
         """Retire les paragraphes vides devenus inutiles dans la zone prestations."""
         selected_ranges = [rng for code, rng in find_zone_ranges().items() if show_zone(code)]
@@ -2560,6 +2606,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
 
     expand_options_tables()
     apply_zone_visibility()
+    apply_visible_zone_operation_filters()
     trim_empty_paragraphs_after_selected_zones()
     paginate_visible_zone_blocks()
     apply_bureau_zone_content()
@@ -2602,6 +2649,18 @@ def _aligner_depart_pages_copro(docx_path: Path):
 
     def texte_para(p):
         return "".join(p.xpath(".//w:t/text()", namespaces=ns)).strip()
+
+    def est_ancre_invisible_prestations_complementaires(p):
+        if texte_para(p):
+            return False
+        if p.find(".//w:pageBreakBefore", namespaces=ns) is not None:
+            return True
+        texts = p.xpath(".//w:t/text()", namespaces=ns)
+        if not texts or any(text.strip() for text in texts):
+            return False
+        colors = p.xpath(".//w:color/@w:val", namespaces=ns)
+        sizes = p.xpath(".//w:sz/@w:val", namespaces=ns)
+        return any(str(color).upper() == "FFFFFF" for color in colors) and "24" in sizes
 
     def est_bloc_coordonnees_couverture(paragraphs, index):
         suivants = [texte_para(candidate) for candidate in paragraphs[index + 1:index + 6]]
@@ -2670,12 +2729,13 @@ def _aligner_depart_pages_copro(docx_path: Path):
                                 spacing.set(qn_w("after"), "0")
 
                                 previous = p.getprevious()
-                                if (
+                                while (
                                     previous is not None
-                                    and not texte_para(previous)
-                                    and previous.find(".//w:pageBreakBefore", namespaces=ns) is not None
+                                    and est_ancre_invisible_prestations_complementaires(previous)
                                 ):
-                                    parent.remove(previous)
+                                    to_remove = previous
+                                    previous = previous.getprevious()
+                                    parent.remove(to_remove)
 
                                 # Le titre "3" est le premier paragraphe apres le saut de page.
                                 # Dans LibreOffice/PDF, un simple space_before reste dans la zone
@@ -2702,9 +2762,11 @@ def _aligner_depart_pages_copro(docx_path: Path):
                                     return spacer
 
                                 insert_at = parent.index(p)
-                                parent.insert(insert_at, build_spacer(with_page_break=True))
-                                parent.insert(insert_at + 1, build_spacer())
-                                parent.insert(insert_at + 2, build_spacer())
+                                for spacer_idx in range(COPRO_PETITE_PREST_COMP_ANCHOR_LINES):
+                                    parent.insert(
+                                        insert_at + spacer_idx,
+                                        build_spacer(with_page_break=(spacer_idx == 0)),
+                                    )
                                 changed = True
                             continue
                         before_value = next(

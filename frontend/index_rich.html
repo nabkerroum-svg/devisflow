@@ -7411,12 +7411,14 @@ function toggleZoneOp(i, j) {
   state.devis.zones[i].ops_enabled[j] = !state.devis.zones[i].ops_enabled[j];
   renderZones();
   updatePreview();
+  saveDraftQuiet();
 }
 
 function toggleAllOps(i, on) {
   state.devis.zones[i].ops_enabled = state.devis.zones[i].ops_enabled.map(() => on);
   renderZones();
   updatePreview();
+  saveDraftQuiet();
 }
 
 /**
@@ -12081,12 +12083,20 @@ function onGabaritChange() {
         if (!back) return;
         const hasFreq = !!freqVar[back] && !z.no_frequency;
         const freq = hasFreq ? (v(z.frequence) || "1 fois par semaine") : "";
+        const zoneOps = Array.isArray(z.operations) ? z.operations : [];
+        const opsEnabled = Array.isArray(z.ops_enabled)
+          ? zoneOps.map((_, idx) => z.ops_enabled[idx] !== false)
+          : zoneOps.map(() => true);
+        const activeOps = zoneOps.filter((op, idx) => opsEnabled[idx] !== false && v(op).trim());
         if (hasFreq) variables[freqVar[back]] = freq;
         zonesSelectionnees.push(back);
-        variables[`OPS_${back.toUpperCase()}`] = (z.operations || []).filter((op, idx) => z.ops_enabled[idx] !== false && v(op).trim());
+        variables[`OPS_${back.toUpperCase()}`] = activeOps;
+        variables[`OPS_ENABLED_${back.toUpperCase()}`] = opsEnabled;
         // Détail pour le tableau financier dynamique (+ option par zone si activée)
         zonesDetail.push({
           code: back, titre: z.titre || back, frequence: freq,
+          operations: activeOps,
+          ops_enabled: opsEnabled,
           prix_ht: (z.prix_ht != null && z.prix_ht !== "") ? z.prix_ht : null,
           option_active: !!z.option_active,
           option_libelle: v(z.option_libelle || ""),

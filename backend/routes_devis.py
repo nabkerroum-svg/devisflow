@@ -690,6 +690,11 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
         data["DATE_SIGNATURE"] = _date_signature_depuis_emission(data.get("DATE_EMISSION", ""))
 
     if recurrent:
+        zones_detail_by_code = {
+            str(z.get("code") or "").lower(): z
+            for z in (payload.zones_detail or [])
+            if isinstance(z, dict) and str(z.get("code") or "").strip()
+        }
         if modele_code == "bureaux_petit" and not str(data.get("TYPE_PRESTATION", "")).strip():
             data["TYPE_PRESTATION"] = "Nettoyage des bureaux"
         elif not str(data.get("TYPE_PRESTATION", "")).strip():
@@ -706,9 +711,17 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
                 data[f"SHOW_{key}"] = bool(show)
                 ops_key = f"OPS_{key}"
                 ops = payload.variables.get(ops_key)
+                detail = zones_detail_by_code.get(code)
+                if detail and isinstance(detail.get("operations"), list):
+                    ops = detail.get("operations")
                 if not isinstance(ops, list):
                     ops = zone.get("operations", [])
                 data[ops_key] = [str(op) for op in ops if str(op).strip()]
+                flags = payload.variables.get(f"OPS_ENABLED_{key}")
+                if detail and isinstance(detail.get("ops_enabled"), list):
+                    flags = detail.get("ops_enabled")
+                if isinstance(flags, list):
+                    data[f"OPS_ENABLED_{key}"] = flags
                 if freq_var and freq_var not in data:
                     data[freq_var] = ""
         else:
@@ -724,6 +737,12 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
                 for z in ZONES:
                     freq = payload.variables.get(f"FREQ_{z}", "")
                     data[f"SHOW_{z}"] = bool(str(freq).strip())
+            for code, detail in zones_detail_by_code.items():
+                key = code.upper()
+                if isinstance(detail.get("operations"), list):
+                    data[f"OPS_{key}"] = [str(op) for op in detail.get("operations") if str(op).strip()]
+                if isinstance(detail.get("ops_enabled"), list):
+                    data[f"OPS_ENABLED_{key}"] = detail.get("ops_enabled")
         # Tableau financier : DYNAMIQUE à partir des zones réellement cochées
         # (et leurs options activées). On ne montre QUE ce qui est sélectionné.
         if payload.zones_detail:
