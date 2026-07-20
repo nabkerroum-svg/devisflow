@@ -563,6 +563,47 @@ def _fmt_optional_number(value: Any) -> str:
     return f"{n:.2f}".replace(".", ",")
 
 
+MOIS_FR = {
+    1: "janvier",
+    2: "février",
+    3: "mars",
+    4: "avril",
+    5: "mai",
+    6: "juin",
+    7: "juillet",
+    8: "août",
+    9: "septembre",
+    10: "octobre",
+    11: "novembre",
+    12: "décembre",
+}
+
+
+def _extraire_date(value: Any) -> date:
+    raw = str(value or "").strip()
+    raw = re.sub(r"^(?:à\s+)?marseille\s*,?\s*le\s+", "", raw, flags=re.I).strip()
+    mois_lookup = {v: k for k, v in MOIS_FR.items()}
+    mois_match = re.fullmatch(r"(\d{1,2})\s+([a-zéû]+)\s+(\d{4})", raw.lower())
+    if mois_match:
+        day = int(mois_match.group(1))
+        month = mois_lookup.get(mois_match.group(2))
+        year = int(mois_match.group(3))
+        if month:
+            return date(year, month, day)
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            pass
+    return date.today()
+
+
+def _format_date_emission_fr(value: Any) -> tuple[str, str]:
+    dt = _extraire_date(value)
+    courte = f"{dt.day} {MOIS_FR[dt.month]} {dt.year}"
+    return courte, f"À Marseille, le {courte}"
+
+
 def _normaliser_lignes_financieres(payload: "DevisPayload", res: P.ResultatDevis, data: Dict[str, Any]) -> Dict[str, Any]:
     """Construit le tableau financier final, avec compatibilite prix unique."""
     raw_lines = [l for l in (payload.lignes_financieres or []) if isinstance(l, dict)]
@@ -679,6 +720,9 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
     modele_code = str(data.pop("_modele_code", "") or payload.template_code or "").lower()
     modele_code = ALIASES_MODELES_PONCTUELS.get(modele_code, modele_code)
     data["MODELE_CODE"] = modele_code
+    date_courte, date_longue = _format_date_emission_fr(data.get("DATE_EMISSION") or payload.date_emission)
+    data["DATE_EMISSION"] = date_courte
+    data["DATE_EMISSION_LONGUE"] = date_longue
     lignes_calc = payload.lignes
     if not recurrent:
         lignes_calc = _nettoyer_lignes_ponctuelles(modele_code, payload.lignes)
@@ -687,7 +731,7 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
         prix_force_ht=payload.prix_force_ht, taux_tva_global=payload.taux_tva,
     )
     if not str(data.get("DATE_SIGNATURE", "")).strip():
-        data["DATE_SIGNATURE"] = _date_signature_depuis_emission(data.get("DATE_EMISSION", ""))
+        data["DATE_SIGNATURE"] = date_courte
 
     if recurrent:
         zones_detail_by_code = {
@@ -815,13 +859,8 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
 
 def _date_signature_depuis_emission(value: Any) -> str:
     """Retourne une date jj/mm/aaaa pour le bloc Bon pour accord."""
-    raw = str(value or "").strip()
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"):
-        try:
-            return datetime.strptime(raw, fmt).strftime("%d/%m/%Y")
-        except ValueError:
-            pass
-    return date.today().strftime("%d/%m/%Y")
+    dt = _extraire_date(value)
+    return dt.strftime("%d/%m/%Y")
 
 
 @router.post("/apercu")

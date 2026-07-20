@@ -1102,7 +1102,7 @@ def _generer_ponctuel_source_preserve_layout(template_path: Path, data: Dict, ou
         for i, p, txt in non_empty:
             raw = p.text.strip()
             if txt.startswith("marseille le"):
-                set_text(p, f"Marseille, le {scalar('DATE_EMISSION') or scalar('DATE_SIGNATURE')}")
+                set_text(p, scalar("DATE_EMISSION_LONGUE") or f"À Marseille, le {scalar('DATE_EMISSION') or scalar('DATE_SIGNATURE')}")
             elif txt.startswith("devis me") or txt == "devis me":
                 set_text(p, f"Devis {scalar('NUMERO_DEVIS')}")
             elif txt in {"nom du client", "siga sas", "nh collection", "cabinet paul coudre"}:
@@ -2444,6 +2444,15 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
         else:
             paragraph.add_run(text)
 
+    def normalize_cover_date() -> None:
+        date_longue = scalar_value("DATE_EMISSION_LONGUE")
+        if not date_longue:
+            return
+        for p in iter_paragraphs():
+            txt = norm(p.text)
+            if txt.startswith("marseille le") or txt.startswith("a marseille le"):
+                replace_paragraph_text(p, date_longue)
+
     def apply_bureau_zone_content():
         """Conserve le gabarit Copro mais remplace les blocs dynamiques par du bureau."""
         modele = str(data.get("MODELE_CODE", "") or "").lower()
@@ -2613,11 +2622,13 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
     photos = filter_photos_for_visible_zones(photos)
     for p in iter_paragraphs():
         replace_in_runs(p)
+    normalize_cover_date()
 
     doc.save(str(output_path))
     _aligner_depart_pages_copro(output_path)
     _injecter_photos(output_path, photos)
     _supprimer_rouge_document(output_path)
+    _supprimer_surlignages_jaunes_document(output_path)
     return output_path
 
 
