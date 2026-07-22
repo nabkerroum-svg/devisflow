@@ -920,6 +920,51 @@ def _supprimer_surlignages_jaunes_document(docx_path: Path) -> None:
         tmp_path.unlink(missing_ok=True)
 
 
+def _normaliser_images_word_compat(docx_path: Path) -> Path:
+    """Normalise le DOCX FINAL pour compatibilité Microsoft Word (images).
+
+    Les masters .doc historiques stockent leurs images en VML flottant
+    (<w:pict>/<v:imagedata>). LibreOffice les affiche (d'où un aperçu correct),
+    mais Word installé ne rend PAS ce VML flottant -> images « disparues » à
+    l'ouverture dans Word. On ré-exporte donc le .docx généré via LibreOffice :
+    le VML est converti en DrawingML (enveloppé en mc:AlternateContent), format
+    rendu par TOUTES les versions de Word.
+
+    Garanties :
+      - positions, dimensions, ratios, habillages et mise en page préservés
+        (ré-export fidèle de LibreOffice — pages fixes 3/4 incluses, vérifié) ;
+      - les images DrawingML inline (photos uploadées par zone) restent intactes ;
+      - AUCUNE modification des templates : agit uniquement sur le fichier généré ;
+      - en cas d'échec de LibreOffice, on conserve le DOCX d'origine (jamais de
+        régression sur le téléchargement Word/PDF déjà fonctionnel).
+    """
+    import tempfile
+    if not docx_path.exists():
+        return docx_path
+    try:
+        warmup_libreoffice()  # évite l'échec de 1re conversion à froid de LibreOffice
+        with _SOFFICE_LOCK:
+            with tempfile.TemporaryDirectory(prefix="lo_norm_out_") as outdir:
+                with tempfile.TemporaryDirectory(prefix="lo_profile_") as profile:
+                    result = subprocess.run(
+                        [SOFFICE_BIN, "--headless",
+                         f"-env:UserInstallation=file://{profile}",
+                         "--convert-to", "docx",
+                         "--outdir", str(outdir), str(docx_path)],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                produced = Path(outdir) / (docx_path.stem + ".docx")
+                if result.returncode == 0 and produced.exists() and produced.stat().st_size > 0:
+                    shutil.move(str(produced), str(docx_path))
+                    _nettoyer_doublons_zip(docx_path)
+                    return docx_path
+                print(f"[normalisation Word] échec, DOCX conservé tel quel : "
+                      f"{(result.stderr or result.stdout or 'sans message')[:200]}")
+    except Exception as exc:
+        print(f"[normalisation Word] exception, DOCX conservé tel quel : {exc}")
+    return docx_path
+
+
 def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
     """
     Génère un .docx en remplissant le template annoté avec les données fournies.
@@ -937,11 +982,14 @@ def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
 
     template_stem = template_path.stem.lower()
     if template_stem in COPRO_PETITE_TEMPLATE_CODES:
-        return _generer_copro_petite_preserve_layout(template_path, data, output_path)
+        _generer_copro_petite_preserve_layout(template_path, data, output_path)
+        return _normaliser_images_word_compat(output_path)
     if template_stem == "bureaux_petit":
-        return _generer_bureaux_petit_preserve_layout(template_path, data, output_path)
+        _generer_bureaux_petit_preserve_layout(template_path, data, output_path)
+        return _normaliser_images_word_compat(output_path)
     if template_stem.startswith(PONCTUEL_TEMPLATE_PREFIX) and template_stem != "ponctuel_generique":
-        return _generer_ponctuel_source_preserve_layout(template_path, data, output_path)
+        _generer_ponctuel_source_preserve_layout(template_path, data, output_path)
+        return _normaliser_images_word_compat(output_path)
 
     _filtrer_mentions_ponctuelles(data)
     doc = DocxTemplate(str(template_path))
@@ -1002,7 +1050,7 @@ def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
         _ajuster_images_prestations_complementaires(output_path)
         if template_stem.startswith(PONCTUEL_TEMPLATE_PREFIX):
             _supprimer_surlignages_jaunes_document(output_path)
-    return output_path
+    return _normaliser_images_word_compat(output_path)
 
 
 def _filtrer_mentions_ponctuelles(data: Dict) -> None:
