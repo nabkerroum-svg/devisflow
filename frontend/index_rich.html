@@ -10947,7 +10947,56 @@ function onMailFieldChange() {
   mailState.salesforce = document.getElementById("mail-salesforce").checked;
 }
 
-function sendMail() {
+// --- Construction d'un e-mail .eml (RFC 822) avec pièce jointe PDF réelle ---
+// mailto: ne permet pas de joindre un fichier. Un fichier .eml, lui, embarque la
+// pièce jointe ; ouvert sous Windows, il s'ouvre dans Outlook, et l'en-tête
+// X-Unsent: 1 fait qu'Outlook l'ouvre en mode composition (brouillon prêt à envoyer).
+function _arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+  }
+  return btoa(binary);
+}
+function _b64Lines(b64) {
+  return (String(b64).match(/.{1,76}/g) || []).join("\r\n");
+}
+function _mimeHeader(value) {
+  value = String(value || "");
+  if (/^[\x00-\x7F]*$/.test(value)) return value;
+  return "=?UTF-8?B?" + btoa(unescape(encodeURIComponent(value))) + "?=";
+}
+function buildEmlWithPdf(opts) {
+  const CRLF = "\r\n";
+  const boundary = "----=_DevisFlow_" + Date.now();
+  const bodyB64 = btoa(unescape(encodeURIComponent(opts.body || "")));
+  const H = [];
+  H.push("X-Unsent: 1");
+  if (opts.to)  H.push("To: " + opts.to);
+  if (opts.cc)  H.push("Cc: " + opts.cc);
+  if (opts.bcc) H.push("Bcc: " + opts.bcc);
+  H.push("Subject: " + _mimeHeader(opts.subject));
+  H.push("MIME-Version: 1.0");
+  H.push('Content-Type: multipart/mixed; boundary="' + boundary + '"');
+  const B = [];
+  B.push("--" + boundary);
+  B.push('Content-Type: text/plain; charset="utf-8"');
+  B.push("Content-Transfer-Encoding: base64");
+  B.push("");
+  B.push(_b64Lines(bodyB64));
+  B.push("--" + boundary);
+  B.push('Content-Type: application/pdf; name="' + opts.pdfName + '"');
+  B.push("Content-Transfer-Encoding: base64");
+  B.push('Content-Disposition: attachment; filename="' + opts.pdfName + '"');
+  B.push("");
+  B.push(_b64Lines(opts.pdfBase64));
+  B.push("--" + boundary + "--");
+  return H.join(CRLF) + CRLF + CRLF + B.join(CRLF) + CRLF;
+}
+
+async function sendMail() {
   onMailFieldChange();
   // Validation
   const errors = validateMailFields();
@@ -10961,24 +11010,6 @@ function sendMail() {
   if (mailState.archive) bccList.push(MAIL_ARCHIVE_ADDRESS);
   if (mailState.salesforce) bccList.push(MAIL_SALESFORCE_ADDRESS);
   const bcc = [...new Set(bccList)].join(", ");
-
-  // Construire l'URL mailto: manuellement.
-  // /!\ Ne PAS utiliser URLSearchParams.toString() : il encode les espaces en "+"
-  // (form-encoding) alors que mailto: attend %20. Beaucoup de clients (Outlook,
-  // Gmail web, Apple Mail) affichent alors littéralement les "+" dans le corps.
-  // → On utilise encodeURIComponent qui encode les espaces en %20, ainsi que
-  //   les accents (à, é, è, ç...), les apostrophes courbes (') et les retours à
-  //   la ligne (qui deviennent %0A, correctement interprétés).
-  const queryParts = [];
-  if (mailState.cc.trim())  queryParts.push("cc="      + encodeURIComponent(mailState.cc.trim()));
-  if (bcc)                  queryParts.push("bcc="     + encodeURIComponent(bcc));
-  if (mailState.subject)    queryParts.push("subject=" + encodeURIComponent(mailState.subject));
-  if (mailState.body)       queryParts.push("body="    + encodeURIComponent(mailState.body));
-
-  const url = `mailto:${encodeURIComponent(mailState.to)}?${queryParts.join("&")}`;
-  if (url.length > 8000) {
-    console.warn("Mail trop long pour mailto:, le corps sera tronqué par certains clients.");
-  }
 
   // Enregistrer l'envoi dans l'historique AVANT d'ouvrir le client mail
   // (pour ne pas perdre la trace si l'utilisateur annule)
@@ -11012,25 +11043,61 @@ function sendMail() {
   renderDevisListing();
   renderEnvoisListing();
 
-  // Télécharger le PDF (pour que l'utilisateur puisse le glisser-déposer dans son client mail)
-  // Les navigateurs ne permettent pas d'attacher automatiquement un fichier via mailto:
-  triggerPdfPrint();
-
-  // Ouvrir le client mail par défaut
+  // --- Pièce jointe PDF réelle ---
+  // mailto: ne peut PAS joindre de fichier. On génère donc le VRAI PDF du devis
+  // (POST /generer → pdf_url) et on produit un fichier .eml contenant ce PDF en
+  // pièce jointe. À l'ouverture du .eml, Outlook s'ouvre en composition (X-Unsent)
+  // avec le PDF déjà attaché, prêt à envoyer.
+  showToast("Génération du PDF et préparation du mail…", "info", 4000);
   try {
-    window.location.href = url;
+    const gen = await ensureGeneratedDevis();
+    if (!gen.pdf_url) throw new Error("PDF non généré par le serveur.");
+    const pdfUrl = /^https?:\/\//i.test(gen.pdf_url)
+      ? gen.pdf_url
+      : (gen.pdf_url.charAt(0) === "/" ? gen.pdf_url : API + "/" + gen.pdf_url);
+    const resp = await fetch(pdfUrl);
+    if (!resp.ok) throw new Error(await readErrorMessage(resp));
+    const buf = await resp.arrayBuffer();
+    const sig = new Uint8Array(buf.slice(0, 4));
+    if (!(sig[0] === 0x25 && sig[1] === 0x50 && sig[2] === 0x44 && sig[3] === 0x46)) {
+      throw new Error("Le serveur n'a pas renvoyé un vrai PDF.");
+    }
+    const base = (gen.numero || state.devis.numero || "devis");
+    const eml = buildEmlWithPdf({
+      to: mailState.to,
+      cc: mailState.cc.trim(),
+      bcc: bcc,
+      subject: mailState.subject,
+      body: mailState.body,
+      pdfBase64: _arrayBufferToBase64(buf),
+      pdfName: base + ".pdf",
+    });
+    saveBlobAs(new Blob([eml], { type: "message/rfc822" }), base + ".eml");
+    closeMailModal();
+    showToast(
+      "E-mail prêt : ouvrez le fichier .eml téléchargé — Outlook s'ouvre avec le PDF du devis déjà en pièce jointe.",
+      "success",
+      8000
+    );
   } catch (e) {
-    console.error("Échec ouverture mailto :", e);
-    showToast("Erreur : votre navigateur n'a pas pu ouvrir le client mail. " + e.message, "danger");
-    return;
+    // Repli : si la génération du PDF/.eml échoue, on ouvre mailto: et on télécharge
+    // le vrai PDF pour un glisser-déposer manuel dans le mail.
+    console.error("Préparation .eml échouée, repli mailto :", e);
+    try { downloadPdf(); } catch (_) {}
+    const queryParts = [];
+    if (mailState.cc.trim())  queryParts.push("cc="      + encodeURIComponent(mailState.cc.trim()));
+    if (bcc)                  queryParts.push("bcc="     + encodeURIComponent(bcc));
+    if (mailState.subject)    queryParts.push("subject=" + encodeURIComponent(mailState.subject));
+    if (mailState.body)       queryParts.push("body="    + encodeURIComponent(mailState.body));
+    const url = `mailto:${encodeURIComponent(mailState.to)}?${queryParts.join("&")}`;
+    try { window.location.href = url; } catch (_) {}
+    closeMailModal();
+    showToast(
+      "Pièce jointe automatique indisponible : le vrai PDF du devis a été téléchargé, glissez-le dans le mail avant l'envoi.",
+      "info",
+      8000
+    );
   }
-
-  closeMailModal();
-  showToast(
-    `Votre client mail s'ouvre. Le PDF du devis a été ouvert dans une nouvelle fenêtre — glissez-le en pièce jointe avant l'envoi.`,
-    "success",
-    6000
-  );
 }
 
 function validateMailFields() {
@@ -11728,7 +11795,7 @@ function onGabaritChange() {
   updatePreview();  // pour que les mentions fixes / pied de page se mettent à jour
 }
 </script>
-<style>#me-conn{position:fixed;bottom:12px;right:14px;z-index:9999;font:600 11px/1 Arial;padding:7px 12px;border-radius:999px}#me-conn.on{background:#e7f5ec;color:#1f7a44}#me-conn.off{background:#fdeeea;color:#b4621b}</style>
+<style>#me-conn{display:none !important;position:fixed;bottom:12px;right:14px;z-index:9999;font:600 11px/1 Arial;padding:7px 12px;border-radius:999px}#me-conn.on{background:#e7f5ec;color:#1f7a44}#me-conn.off{background:#fdeeea;color:#b4621b}</style>
 <div id="me-conn" class="off">…</div>
 <script>
 /* =====================================================================
