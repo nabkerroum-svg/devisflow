@@ -11682,7 +11682,10 @@ function onGabaritChange() {
    bascule en mode local pour que la maquette reste consultable.
    ===================================================================== */
 (function () {
-  const API = (location.origin && location.origin.startsWith("http"))
+  // Correctif portée : `API` doit être accessible depuis TOUS les blocs <script>
+  // (ensureGeneratedDevis / downloadGeneratedFile vivent dans un bloc antérieur).
+  // On l'expose donc en global via window.API, tout en gardant le const local.
+  const API = window.API = (location.origin && location.origin.startsWith("http"))
     ? location.origin + "/api" : "/api";
 
   const ME_API = {

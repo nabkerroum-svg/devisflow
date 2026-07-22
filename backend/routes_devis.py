@@ -948,12 +948,14 @@ def generer_devis(payload: DevisPayload, session: Session = Depends(get_session)
     except Exception as e:
         raise HTTPException(500, f"Erreur de génération .docx : {e}")
 
-    # Générer le PDF
-    output_pdf = None
+    # Générer le PDF.
+    # Correctif : on ne masque plus l'échec derrière un pdf_url null silencieux.
+    # docx_to_pdf gère déjà warm-up + retry unique ; s'il échoue encore, on
+    # remonte une erreur explicite contenant le message exact de LibreOffice.
     try:
         output_pdf = docx_to_pdf(output_docx, GENERATED_DIR)
     except Exception as e:
-        print(f"[warn] PDF non généré : {e}")
+        raise HTTPException(500, f"Conversion PDF impossible : {e}")
 
     # Diagnostic : nombre de pages + détection de page blanche (page < 8 mots)
     pdf_pages = None

@@ -5272,16 +5272,69 @@ def _ajouter_signature_cgv(docx_path: Path):
 
 import threading as _threading
 _SOFFICE_LOCK = _threading.Lock()
+_WARMUP_DONE = False
+_WARMUP_LOCK = _threading.Lock()
+
+
+def _run_soffice_pdf(docx_path: Path, pdf_dir: Path, profile: str):
+    """Lance une conversion LibreOffice .docx -> .pdf dans un profil isolé."""
+    return subprocess.run(
+        [SOFFICE_BIN, "--headless",
+         f"-env:UserInstallation=file://{profile}",
+         "--convert-to", "pdf",
+         "--outdir", str(pdf_dir), str(docx_path)],
+        capture_output=True, text=True, timeout=90,
+    )
+
+
+def warmup_libreoffice() -> None:
+    """Réchauffe LibreOffice une seule fois (démarrage à froid).
+
+    La toute première conversion d'un process LibreOffice échoue de façon
+    intermittente (SfxBaseModel::impl_store / Io-Abort). On paie donc ce coût
+    une fois, sur un document jetable, pour que la première VRAIE conversion
+    ne soit jamais celle qui essuie le démarrage à froid. Toute erreur ici est
+    volontairement ignorée : même une tentative ratée « réchauffe » LibreOffice.
+    """
+    global _WARMUP_DONE
+    if _WARMUP_DONE:
+        return
+    import tempfile
+    with _WARMUP_LOCK:
+        if _WARMUP_DONE:
+            return
+        try:
+            from docx import Document as _Doc
+            with tempfile.TemporaryDirectory(prefix="lo_warmup_") as d:
+                dd = Path(d)
+                src = dd / "warmup.docx"
+                _doc = _Doc()
+                _doc.add_paragraph("warmup")
+                _doc.save(str(src))
+                with _SOFFICE_LOCK:
+                    with tempfile.TemporaryDirectory(prefix="lo_profile_") as profile:
+                        _run_soffice_pdf(src, dd, profile)
+        except Exception as exc:
+            print(f"[warmup] LibreOffice non concluant (ignoré) : {exc}")
+        finally:
+            _WARMUP_DONE = True
 
 
 def docx_to_pdf(docx_path: Path, pdf_dir: Optional[Path] = None) -> Path:
     """
     Convertit un .docx en .pdf via LibreOffice headless.
 
-    Concurrence : LibreOffice partage par défaut un profil utilisateur unique,
-    ce qui fait échouer les conversions simultanées (erreur 500 intermittente).
-    On isole donc chaque conversion dans un profil temporaire dédié, et on
-    sérialise par sécurité avec un verrou.
+    Fiabilité (correctif) :
+      - warm-up : LibreOffice est réchauffé une fois avant toute conversion,
+        car la première conversion d'un process échoue de façon intermittente ;
+      - retry unique : si la conversion échoue, on retente automatiquement une
+        seule fois (un profil neuf par tentative) ;
+      - erreur explicite : si la 2e tentative échoue aussi, on lève une
+        RuntimeError contenant le message exact de LibreOffice — plus jamais de
+        PDF manquant « en silence ».
+
+    Concurrence : chaque conversion est isolée dans un profil temporaire dédié
+    et sérialisée par un verrou.
 
     Args:
         docx_path : fichier .docx à convertir
@@ -5293,20 +5346,45 @@ def docx_to_pdf(docx_path: Path, pdf_dir: Optional[Path] = None) -> Path:
     import tempfile
     pdf_dir = pdf_dir or docx_path.parent
     pdf_dir.mkdir(parents=True, exist_ok=True)
-
-    with _SOFFICE_LOCK:
-        with tempfile.TemporaryDirectory(prefix="lo_profile_") as profile:
-            result = subprocess.run(
-                [SOFFICE_BIN, "--headless",
-                 f"-env:UserInstallation=file://{profile}",
-                 "--convert-to", "pdf",
-                 "--outdir", str(pdf_dir), str(docx_path)],
-                capture_output=True, text=True, timeout=90,
-            )
-    if result.returncode != 0:
-        raise RuntimeError(f"Conversion PDF échouée : {result.stderr or result.stdout}")
-
     pdf_path = pdf_dir / (docx_path.stem + ".pdf")
-    if not pdf_path.exists():
-        raise RuntimeError(f"PDF non créé : {pdf_path}")
-    return pdf_path
+
+    # Nettoyage défensif : un essai précédent interrompu peut laisser un verrou
+    # LibreOffice « .~lock.<fichier>.pdf# » qui bloque toute réécriture du même
+    # nom (SfxBaseModel::impl_store / Io-Abort). On le retire s'il traîne.
+    stale_lock = pdf_dir / f".~lock.{docx_path.stem}.pdf#"
+    try:
+        if stale_lock.exists():
+            stale_lock.unlink()
+    except Exception:
+        pass
+
+    # 1) Warm-up (idempotent : une seule vraie exécution par process)
+    warmup_libreoffice()
+
+    last_error = ""
+    # 2) Tentative + retry unique (2 essais au total)
+    with _SOFFICE_LOCK:
+        for tentative in (1, 2):
+            # On convertit vers un dossier de sortie NEUF : impossible d'y trouver
+            # un verrou résiduel ou un PDF préexistant qui ferait échouer l'écriture.
+            with tempfile.TemporaryDirectory(prefix="lo_out_") as outdir:
+                outdir_p = Path(outdir)
+                with tempfile.TemporaryDirectory(prefix="lo_profile_") as profile:
+                    result = _run_soffice_pdf(docx_path, outdir_p, profile)
+                produced = outdir_p / (docx_path.stem + ".pdf")
+                if result.returncode == 0 and produced.exists():
+                    try:
+                        if pdf_path.exists():
+                            pdf_path.unlink()
+                    except Exception:
+                        pass
+                    shutil.move(str(produced), str(pdf_path))
+                    return pdf_path
+                last_error = (result.stderr or result.stdout or "").strip()
+                print(f"[docx_to_pdf] tentative {tentative}/2 échouée : {last_error[:200]}")
+
+    # 3) Échec après retry -> erreur explicite (jamais de pdf_url null silencieux)
+    raise RuntimeError(
+        f"Conversion PDF échouée après 2 tentatives (LibreOffice) : "
+        f"{last_error or 'aucun message renvoyé'}"
+    )
