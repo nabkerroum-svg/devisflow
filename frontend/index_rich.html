@@ -12991,6 +12991,15 @@ function onGabaritChange() {
   const ME_VERSION = "DevisFlow 11 — synchronisation interface/devis — 2026-06-23";
 
   function installVersionBadge() {
+    // Barre diagnostic/technique (badge version + « Diagnostic devis » + « Modèle
+    // Word ») MASQUÉE par défaut en production : elle encombrait l'écran de travail.
+    // Le code est conservé pour le développement. Pour la réafficher : ajouter
+    // ?debug=1 à l'URL, ou définir window.DEVISFLOW_DEBUG = true.
+    var _debugMode = (typeof window !== "undefined") && (
+      window.DEVISFLOW_DEBUG === true ||
+      /[?&]debug=1(&|$)/.test((location && location.search) || "")
+    );
+    if (!_debugMode) return;
     if (document.getElementById("me-version")) return;
     const v = document.createElement("div");
     v.id = "me-version";
