@@ -8688,7 +8688,16 @@ async function ensureGeneratedDevis() {
 }
 
 async function downloadGeneratedFile(url, filename, kind) {
-  const r = await fetch(API + url);
+  // Les URLs docx_url / pdf_url renvoyées par le backend sont DÉJÀ des chemins
+  // absolus ("/api/devis/.../docx"). Il ne faut donc pas re-préfixer avec API :
+  // "API + url" donnerait "/api/api/devis/.../docx", qui ne correspond à aucune
+  // route API et tombe sur la SPA (catch-all) → le serveur renvoie index.html
+  // (HTML) au lieu du fichier, d'où "Le serveur n'a pas renvoyé un vrai fichier
+  // Word". On résout donc l'URL telle quelle si elle est déjà absolue.
+  const fullUrl = /^https?:\/\//i.test(url)
+    ? url
+    : (url.charAt(0) === "/" ? url : (API + "/" + url));
+  const r = await fetch(fullUrl);
   if (!r.ok) throw new Error(await readErrorMessage(r));
   const raw = await r.arrayBuffer();
   const bytes = new Uint8Array(raw.slice(0, 5));
