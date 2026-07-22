@@ -6980,6 +6980,10 @@ function selectModele(code) {
       ops_enabled: z.operations.map(() => true),
       // expanded : panneau d'opérations dépliable
       expanded: false,
+      // prestations_libres : prestations descriptives ajoutées à la main pour
+      // cette zone. Purement descriptives : elles s'affichent dans le détail de
+      // la zone mais n'entrent JAMAIS dans le prix (aucune ligne financière).
+      prestations_libres: [],
       selected: false,
       no_frequency: !!z.no_frequency,
       frequence: z.no_frequency ? "" : (code === "local_poubelles" ? "6 fois par semaine" : "1 fois par semaine"),
@@ -7300,6 +7304,30 @@ function renderZones() {
               `).join("")}
             </div>
 
+            <!-- Prestations libres (descriptives, SANS prix) ajoutées à la main
+                 pour compléter le contenu technique de la zone -->
+            <div class="zone-libres-slot" style="margin-top:10px;padding:10px 12px;border:1px dashed #d8d3c8;border-radius:8px;background:#fafaf8">
+              <div style="font:600 12px Arial;color:#3a352c;margin-bottom:6px">
+                Prestations libres <span style="font-weight:400;color:#8c877c">— descriptives, sans impact sur le prix</span>
+              </div>
+              ${(z.prestations_libres || []).length ? `
+                <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
+                  ${(z.prestations_libres || []).map((pl, k) => `
+                    <div style="display:flex;align-items:center;gap:8px;font:12px Arial;color:#3a352c">
+                      <span style="flex:1">•&nbsp;${escapeHtml(pl)}</span>
+                      <button class="btn btn--ghost btn--sm" title="Supprimer" onclick="removePrestationLibre(${i}, ${k})">✕</button>
+                    </div>
+                  `).join("")}
+                </div>
+              ` : ""}
+              <div style="display:flex;gap:8px">
+                <input type="text" id="libre-input-${i}" placeholder="ex : Nettoyage ponctuel des traces sur la porte vitrée"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();addPrestationLibre(${i});}"
+                       style="flex:1;min-width:0;font:12px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px">
+                <button class="btn btn--ghost btn--sm" onclick="addPrestationLibre(${i})">Ajouter</button>
+              </div>
+            </div>
+
             <!-- Slot photo de la zone : uploadée par le commercial, affichée à côté
                  de la description dans le devis final (écran + PDF) -->
             <div class="zone-photo-slot">
@@ -7381,6 +7409,29 @@ function renderZones() {
 function toggleZoneExpand(i) {
   state.devis.zones[i].expanded = !state.devis.zones[i].expanded;
   renderZones();
+}
+
+function addPrestationLibre(i) {
+  const input = document.getElementById(`libre-input-${i}`);
+  if (!input) return;
+  const val = (input.value || "").trim();
+  if (!val) return;
+  const z = state.devis.zones[i];
+  if (!Array.isArray(z.prestations_libres)) z.prestations_libres = [];
+  z.prestations_libres.push(val);
+  input.value = "";
+  renderZones();
+  if (typeof updatePreview === "function") updatePreview();
+  if (typeof saveDraft === "function") saveDraft();
+}
+
+function removePrestationLibre(i, k) {
+  const z = state.devis.zones[i];
+  if (!Array.isArray(z.prestations_libres)) return;
+  z.prestations_libres.splice(k, 1);
+  renderZones();
+  if (typeof updatePreview === "function") updatePreview();
+  if (typeof saveDraft === "function") saveDraft();
 }
 
 function toggleZoneOption(i, on) {
@@ -12109,6 +12160,10 @@ function onGabaritChange() {
           code: back, titre: z.titre || back, frequence: freq,
           operations: activeOps,
           ops_enabled: opsEnabled,
+          // Prestations libres descriptives (sans prix) rattachées à la zone.
+          prestations_libres: Array.isArray(z.prestations_libres)
+            ? z.prestations_libres.map(x => v(x)).filter(x => x && x.trim())
+            : [],
           prix_ht: (z.prix_ht != null && z.prix_ht !== "") ? z.prix_ht : null,
           option_active: !!z.option_active,
           option_libelle: v(z.option_libelle || ""),

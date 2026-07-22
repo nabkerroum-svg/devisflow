@@ -1580,6 +1580,12 @@ def _generer_bureaux_petit_preserve_layout(template_path: Path, data: Dict, outp
             operations = []
         operations = [str(op).replace("{{ NB_COLLABORATEURS }}", scalar("NB_COLLABORATEURS")).strip()
                       for op in operations if str(op).strip()]
+        # Prestations libres (descriptives, sans prix) ajoutées par l'utilisateur :
+        # elles s'affichent comme des puces d'opération dans la zone, mais restent
+        # hors de tout calcul (voir routes_devis : LIBRE_* n'alimente pas le tarif).
+        libres = data.get(f"LIBRE_{code}")
+        if isinstance(libres, list):
+            operations = operations + [str(x).strip() for x in libres if str(x).strip()]
         freq = str(data.get(freq_var, "") or "").strip() if freq_var else ""
         desired = [(title, "title"), ("", "blank")]
         desired.extend((f"-   {op}", "operation") for op in operations)
@@ -2659,9 +2665,60 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     fill_option_row(table.rows[-1], opt)
                 return
 
+    def insert_free_prestations():
+        """Insère les prestations LIBRES (descriptives, SANS prix) dans le détail
+        de chaque zone visible, juste avant la ligne Fréquence. Le format est cloné
+        d'une puce existante de la zone pour préserver strictement la mise en page.
+        Ces libellés sont purement descriptifs : ils n'entrent jamais dans le calcul
+        ni dans la proposition financière (voir routes_devis : LIBRE_* est distinct
+        des lignes financières)."""
+        W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        title_by_code = {code: title for code, title, _al in zone_defs}
+        for code, (start, end) in find_zone_ranges().items():
+            if not show_zone(code):
+                continue
+            libres = data.get(f"LIBRE_{code}")
+            if not isinstance(libres, list) or not libres:
+                continue
+            zone_paras = doc.paragraphs[start:end + 1]
+            title_norm = norm(title_by_code.get(code, ""))
+            freq_para = None
+            ref_bullet = None
+            for p in zone_paras:
+                t = norm(p.text)
+                if not t:
+                    continue
+                if "frequence" in t or f"freq {code.lower()}" in t:
+                    freq_para = p
+                    break
+                if t != title_norm and (not title_norm or title_norm not in t):
+                    ref_bullet = p
+            anchor = freq_para or (zone_paras[-1] if zone_paras else None)
+            if anchor is None:
+                continue
+            prefix = ""
+            if ref_bullet is not None:
+                m = re.match(r"^[\s\-–• ]+", ref_bullet.text or "")
+                prefix = m.group(0) if m else ""
+            for op in libres:
+                op = str(op).strip()
+                if not op:
+                    continue
+                if ref_bullet is not None:
+                    new_el = copy.deepcopy(ref_bullet._element)
+                    ts = list(new_el.iter(W + "t"))
+                    if ts:
+                        ts[0].text = prefix + op
+                        for t in ts[1:]:
+                            t.text = ""
+                        anchor._element.addprevious(new_el)
+                        continue
+                anchor.insert_paragraph_before(f"-   {op}")
+
     expand_options_tables()
     apply_zone_visibility()
     apply_visible_zone_operation_filters()
+    insert_free_prestations()
     trim_empty_paragraphs_after_selected_zones()
     paginate_visible_zone_blocks()
     apply_bureau_zone_content()

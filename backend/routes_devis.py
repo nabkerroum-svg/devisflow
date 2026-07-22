@@ -766,6 +766,10 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
                     flags = detail.get("ops_enabled")
                 if isinstance(flags, list):
                     data[f"OPS_ENABLED_{key}"] = flags
+                # Prestations libres descriptives (sans prix) rattachées à la zone.
+                libres = detail.get("prestations_libres") if detail else None
+                if isinstance(libres, list):
+                    data[f"LIBRE_{key}"] = [str(x).strip() for x in libres if str(x).strip()]
                 if freq_var and freq_var not in data:
                     data[freq_var] = ""
         else:
@@ -787,6 +791,10 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
                     data[f"OPS_{key}"] = [str(op) for op in detail.get("operations") if str(op).strip()]
                 if isinstance(detail.get("ops_enabled"), list):
                     data[f"OPS_ENABLED_{key}"] = detail.get("ops_enabled")
+                # Prestations libres descriptives (sans prix) rattachées à la zone.
+                libres = detail.get("prestations_libres")
+                if isinstance(libres, list):
+                    data[f"LIBRE_{key}"] = [str(x).strip() for x in libres if str(x).strip()]
         # Tableau financier : DYNAMIQUE à partir des zones réellement cochées
         # (et leurs options activées). On ne montre QUE ce qui est sélectionné.
         if payload.zones_detail:
