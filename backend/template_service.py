@@ -2700,18 +2700,24 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
             if ref_bullet is not None:
                 m = re.match(r"^[\s\-–• ]+", ref_bullet.text or "")
                 prefix = m.group(0) if m else ""
+            # On insère À LA SUITE de la dernière prestation existante (et non avant
+            # « Fréquence »). Sinon le paragraphe d'espacement qui précède la fréquence
+            # se retrouve intercalé -> saut de ligne parasite + fréquence collée.
+            # Résultat visé : ...dernière puce -> libres -> [espacement] -> Fréquence.
+            cursor = ref_bullet._element if ref_bullet is not None else None
             for op in libres:
                 op = str(op).strip()
                 if not op:
                     continue
-                if ref_bullet is not None:
+                if cursor is not None:
                     new_el = copy.deepcopy(ref_bullet._element)
                     ts = list(new_el.iter(W + "t"))
                     if ts:
                         ts[0].text = prefix + op
                         for t in ts[1:]:
                             t.text = ""
-                        anchor._element.addprevious(new_el)
+                        cursor.addnext(new_el)
+                        cursor = new_el
                         continue
                 anchor.insert_paragraph_before(f"-   {op}")
 
