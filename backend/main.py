@@ -123,12 +123,23 @@ def version():
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR / "static")), name="static")
 
+    # Anti-cache pour le HTML : index_rich.html embarque TOUT le JS de l'appli.
+    # Sans ces en-têtes, le navigateur (et Railway) resservent l'ancienne version
+    # après un redéploiement -> « mes modifications n'apparaissent pas ». On force
+    # donc une revalidation à chaque chargement du HTML (les assets /static, eux,
+    # restent cachés normalement).
+    _NO_CACHE = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     @app.get("/")
     def root():
         rich = FRONTEND_DIR / "index_rich.html"
         if rich.exists():
-            return FileResponse(rich, media_type="text/html; charset=utf-8")
-        return FileResponse(FRONTEND_DIR / "index.html", media_type="text/html; charset=utf-8")
+            return FileResponse(rich, media_type="text/html; charset=utf-8", headers=_NO_CACHE)
+        return FileResponse(FRONTEND_DIR / "index.html", media_type="text/html; charset=utf-8", headers=_NO_CACHE)
 
     @app.get("/{path:path}")
     def spa_fallback(path: str):
@@ -136,7 +147,7 @@ if FRONTEND_DIR.exists():
         candidate = FRONTEND_DIR / path
         if candidate.exists() and candidate.is_file():
             if candidate.suffix.lower() == ".html":
-                return FileResponse(candidate, media_type="text/html; charset=utf-8")
+                return FileResponse(candidate, media_type="text/html; charset=utf-8", headers=_NO_CACHE)
             return FileResponse(candidate)
         # Sinon, retomber sur index.html (SPA)
-        return FileResponse(FRONTEND_DIR / "index.html", media_type="text/html; charset=utf-8")
+        return FileResponse(FRONTEND_DIR / "index.html", media_type="text/html; charset=utf-8", headers=_NO_CACHE)
