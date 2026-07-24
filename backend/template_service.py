@@ -965,6 +965,57 @@ def _normaliser_images_word_compat(docx_path: Path) -> Path:
     return docx_path
 
 
+def _inserer_reference_client(docx_path: Path, ref) -> Path:
+    """Insère « Référence client : <ref> » dans l'en-tête administratif du devis
+    (juste après la ligne « Proposition <n°> » / « Devis <n°> » de la couverture),
+    UNIQUEMENT si une référence est renseignée. Rien n'est affiché si le champ est
+    vide. N'agit que sur le document généré, jamais sur le template. Idempotent."""
+    ref = str(ref or "").strip()
+    if not ref:
+        return docx_path
+    try:
+        from docx import Document as _Doc
+        import copy as _copy
+        import re as _re
+        import unicodedata as _ud
+        doc = _Doc(str(docx_path))
+
+        def norm(t):
+            t = (t or "").lower().replace("\xa0", " ")
+            t = _ud.normalize("NFKD", t)
+            t = "".join(c for c in t if not _ud.combining(c))
+            return _re.sub(r"\s+", " ", t).strip()
+
+        # Idempotence : ne pas ré-insérer si la référence est déjà présente
+        for p in doc.paragraphs:
+            if "reference client" in norm(p.text):
+                return docx_path
+
+        anchor = None
+        for p in doc.paragraphs:
+            n = norm(p.text)
+            if len(n) < 40 and (n.startswith("proposition ") or n.startswith("devis ")):
+                anchor = p
+                break
+        if anchor is None:
+            return docx_path
+
+        W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        new_el = _copy.deepcopy(anchor._element)
+        ts = list(new_el.iter(W + "t"))
+        if not ts:
+            return docx_path
+        ts[0].text = f"Référence client : {ref}"
+        for t in ts[1:]:
+            t.text = ""
+        anchor._element.addnext(new_el)
+        doc.save(str(docx_path))
+        _nettoyer_doublons_zip(docx_path)
+    except Exception as exc:
+        print(f"[reference client] insertion ignorée : {exc}")
+    return docx_path
+
+
 def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
     """
     Génère un .docx en remplissant le template annoté avec les données fournies.
@@ -983,12 +1034,15 @@ def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
     template_stem = template_path.stem.lower()
     if template_stem in COPRO_PETITE_TEMPLATE_CODES:
         _generer_copro_petite_preserve_layout(template_path, data, output_path)
+        _inserer_reference_client(output_path, data.get("REF_CLIENT"))
         return _normaliser_images_word_compat(output_path)
     if template_stem == "bureaux_petit":
         _generer_bureaux_petit_preserve_layout(template_path, data, output_path)
+        _inserer_reference_client(output_path, data.get("REF_CLIENT"))
         return _normaliser_images_word_compat(output_path)
     if template_stem.startswith(PONCTUEL_TEMPLATE_PREFIX) and template_stem != "ponctuel_generique":
         _generer_ponctuel_source_preserve_layout(template_path, data, output_path)
+        _inserer_reference_client(output_path, data.get("REF_CLIENT"))
         return _normaliser_images_word_compat(output_path)
 
     _filtrer_mentions_ponctuelles(data)
@@ -1050,6 +1104,7 @@ def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
         _ajuster_images_prestations_complementaires(output_path)
         if template_stem.startswith(PONCTUEL_TEMPLATE_PREFIX):
             _supprimer_surlignages_jaunes_document(output_path)
+    _inserer_reference_client(output_path, data.get("REF_CLIENT"))
     return _normaliser_images_word_compat(output_path)
 
 

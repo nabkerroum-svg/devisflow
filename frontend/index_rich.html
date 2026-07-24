@@ -12155,6 +12155,8 @@ function onGabaritChange() {
     const variables = {
       NUMERO_DEVIS: v(dd.numero),
       DATE_EMISSION: v(dd.date_emission),
+      // Référence client saisie dans l'interface (peut être vide → non affichée)
+      REF_CLIENT: v((dd.info && dd.info.ref_client) || ""),
       TYPE_PRESTATION: v((dd.info && dd.info.type_prestation) || (modeleMetier && modeleMetier.objet_principal) || ""),
       DEST_LIGNE1: nomComplet || v(cli.raison_sociale),
       DEST_LIGNE2: nomComplet ? v(cli.raison_sociale) : v(cli.adresse),
