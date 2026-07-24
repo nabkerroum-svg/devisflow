@@ -991,24 +991,46 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
             if "reference client" in norm(p.text):
                 return docx_path
 
-        anchor = None
-        for p in doc.paragraphs:
+        # Repère la ligne « Proposition <n°> » / « Devis <n°> » de la couverture.
+        paras = doc.paragraphs
+        anchor_idx = None
+        for i, p in enumerate(paras):
             n = norm(p.text)
             if len(n) < 40 and (n.startswith("proposition ") or n.startswith("devis ")):
-                anchor = p
+                anchor_idx = i
                 break
-        if anchor is None:
+        if anchor_idx is None:
             return docx_path
 
+        # Remonte au HAUT de l'espace vide qui précède « Proposition » (colonne
+        # gauche de la page de garde) : la référence doit s'y afficher (emplacement
+        # demandé), juste sous le bloc client.
+        top_empty_idx = anchor_idx
+        j = anchor_idx - 1
+        while j >= 0 and not (paras[j].text or "").strip():
+            top_empty_idx = j
+            j -= 1
+
+        # Ligne de référence, stylée comme « Proposition » pour rester cohérente.
         W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-        new_el = _copy.deepcopy(anchor._element)
+        new_el = _copy.deepcopy(paras[anchor_idx]._element)
         ts = list(new_el.iter(W + "t"))
         if not ts:
             return docx_path
         ts[0].text = f"Référence client : {ref}"
         for t in ts[1:]:
             t.text = ""
-        anchor._element.addnext(new_el)
+
+        if top_empty_idx < anchor_idx:
+            # Il existe des paragraphes vides d'espacement : on remplace le plus
+            # haut par la référence (aucune ligne ajoutée → page de garde intacte).
+            spacer = paras[top_empty_idx]
+            spacer._element.addprevious(new_el)
+            spacer._element.getparent().remove(spacer._element)
+        else:
+            # Pas d'espace vide : on insère simplement avant « Proposition ».
+            paras[anchor_idx]._element.addprevious(new_el)
+
         doc.save(str(docx_path))
         _nettoyer_doublons_zip(docx_path)
     except Exception as exc:
