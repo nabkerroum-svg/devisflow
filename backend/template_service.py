@@ -986,53 +986,89 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
             t = "".join(c for c in t if not _ud.combining(c))
             return _re.sub(r"\s+", " ", t).strip()
 
+        W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        line = f"Référence client : {ref}"
+
+        def all_paras():
+            out = list(doc.paragraphs)
+            for tb in doc.tables:
+                for row in tb.rows:
+                    for cell in row.cells:
+                        out.extend(cell.paragraphs)
+            return out
+
         # Idempotence : ne pas ré-insérer si la référence est déjà présente
-        for p in doc.paragraphs:
+        for p in all_paras():
             if "reference client" in norm(p.text):
                 return docx_path
 
-        # Repère la ligne « Proposition <n°> » / « Devis <n°> » de la couverture.
-        paras = doc.paragraphs
-        anchor_idx = None
-        for i, p in enumerate(paras):
-            n = norm(p.text)
-            if len(n) < 40 and (n.startswith("proposition ") or n.startswith("devis ")):
-                anchor_idx = i
-                break
-        if anchor_idx is None:
+        def make_ref_el(style_ref):
+            """Élément <w:p> « Référence client : … », en clonant le style d'un
+            paragraphe de référence quand c'est possible, sinon un paragraphe neuf."""
+            if style_ref is not None:
+                el = _copy.deepcopy(style_ref._element)
+                ts = list(el.iter(W + "t"))
+                if ts:
+                    ts[0].text = line
+                    for t in ts[1:]:
+                        t.text = ""
+                    return el
+            from docx.oxml import OxmlElement
+            p = OxmlElement("w:p")
+            r = OxmlElement("w:r")
+            t = OxmlElement("w:t")
+            t.text = line
+            r.append(t)
+            p.append(r)
+            return p
+
+        def _short_prop(n):
+            return len(n) < 40 and (n.startswith("proposition ") or n.startswith("devis "))
+
+        # --- Stratégie 1 (préférée) : « Proposition »/« Devis » dans le CORPS ---
+        # → référence placée en haut de l'espace vide gauche, sous le bloc client.
+        body = doc.paragraphs
+        anchor_idx = next((i for i, p in enumerate(body) if _short_prop(norm(p.text))), None)
+        if anchor_idx is not None:
+            new_el = make_ref_el(body[anchor_idx])
+            top = anchor_idx
+            j = anchor_idx - 1
+            while j >= 0 and not (body[j].text or "").strip():
+                top = j
+                j -= 1
+            if top < anchor_idx:
+                sp = body[top]
+                sp._element.addprevious(new_el)
+                sp._element.getparent().remove(sp._element)
+            else:
+                body[anchor_idx]._element.addprevious(new_el)
+            doc.save(str(docx_path))
+            _nettoyer_doublons_zip(docx_path)
             return docx_path
 
-        # Remonte au HAUT de l'espace vide qui précède « Proposition » (colonne
-        # gauche de la page de garde) : la référence doit s'y afficher (emplacement
-        # demandé), juste sous le bloc client.
-        top_empty_idx = anchor_idx
-        j = anchor_idx - 1
-        while j >= 0 and not (paras[j].text or "").strip():
-            top_empty_idx = j
-            j -= 1
+        # --- Stratégie 2 : « Proposition »/« Devis » dans un TABLEAU (couverture
+        # mise en page via un tableau selon les variantes de template) ---
+        for p in all_paras():
+            if _short_prop(norm(p.text)):
+                p._element.addprevious(make_ref_el(p))
+                doc.save(str(docx_path))
+                _nettoyer_doublons_zip(docx_path)
+                return docx_path
 
-        # Ligne de référence, stylée comme « Proposition » pour rester cohérente.
-        W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-        new_el = _copy.deepcopy(paras[anchor_idx]._element)
-        ts = list(new_el.iter(W + "t"))
-        if not ts:
-            return docx_path
-        ts[0].text = f"Référence client : {ref}"
-        for t in ts[1:]:
-            t.text = ""
+        # --- Stratégie 3 : juste après la ligne de date « Marseille, le … » ---
+        for p in all_paras():
+            if "marseille le" in norm(p.text):
+                p._element.addnext(make_ref_el(p))
+                doc.save(str(docx_path))
+                _nettoyer_doublons_zip(docx_path)
+                return docx_path
 
-        if top_empty_idx < anchor_idx:
-            # Il existe des paragraphes vides d'espacement : on remplace le plus
-            # haut par la référence (aucune ligne ajoutée → page de garde intacte).
-            spacer = paras[top_empty_idx]
-            spacer._element.addprevious(new_el)
-            spacer._element.getparent().remove(spacer._element)
-        else:
-            # Pas d'espace vide : on insère simplement avant « Proposition ».
-            paras[anchor_idx]._element.addprevious(new_el)
-
-        doc.save(str(docx_path))
-        _nettoyer_doublons_zip(docx_path)
+        # --- Repli ultime : en tête du corps, garantit une visibilité ---
+        if body:
+            ref_style = body[0] if (body[0].text or "").strip() else None
+            body[0]._element.addnext(make_ref_el(ref_style))
+            doc.save(str(docx_path))
+            _nettoyer_doublons_zip(docx_path)
     except Exception as exc:
         print(f"[reference client] insertion ignorée : {exc}")
     return docx_path
