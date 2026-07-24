@@ -2721,109 +2721,10 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                         continue
                 anchor.insert_paragraph_before(f"-   {op}")
 
-    def insert_postes_remise_etat():
-        """Structure Poste 1 / Poste 2 — insérée UNIQUEMENT si la remise en état
-        est activée (data['REMISE_ACTIF']). Sinon, le document reste strictement
-        identique à l'existant. Poste 2 = remise en état PONCTUELLE, distincte du
-        forfait mensuel : inséré après les zones (détail) et après le tableau
-        financier (proposition), sans jamais toucher aux pages fixes 3 et 4."""
-        if not data.get("REMISE_ACTIF"):
-            return
-        W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-
-        def has_num(p):
-            return bool(p._p.findall(".//" + W + "numPr"))
-
-        ranges = find_zone_ranges()
-        visible = sorted(((c, se) for c, se in ranges.items() if show_zone(c)),
-                         key=lambda x: x[1][0])
-        if not visible:
-            return
-        first_start, first_end = visible[0][1]
-        heading_ref = doc.paragraphs[first_start]  # titre de zone (gras) — référence de style
-        bullet_ref = None
-        for p in doc.paragraphs[first_start + 1:first_end + 1]:
-            if norm(p.text) and "frequence" not in norm(p.text) and has_num(p):
-                bullet_ref = p
-                break
-        body_ref = None
-        for p in doc.paragraphs:
-            if norm(p.text).startswith("suite a votre demande"):
-                body_ref = p
-                break
-        if body_ref is None:
-            body_ref = heading_ref
-
-        def clone(ref, text):
-            el = copy.deepcopy(ref._element)
-            ts = list(el.iter(W + "t"))
-            if ts:
-                ts[0].text = text
-                for t in ts[1:]:
-                    t.text = ""
-            return el
-
-        titre_p2 = (data.get("REMISE_TITRE") or "Remise en état").strip()
-
-        # 1) Titre « Poste 1 » avant la 1re zone
-        for p in doc.paragraphs:
-            if "detail des prestations" in norm(p.text):
-                p._element.addnext(clone(heading_ref, "Poste 1 – Entretien des parties communes"))
-                break
-
-        # 2) Bloc « Poste 2 » (détail) avant « 3 - Prestations complémentaires »
-        fixed3 = None
-        for p in doc.paragraphs:
-            if "prestations complementaires" in norm(p.text):
-                fixed3 = p
-                break
-        if fixed3 is not None:
-            intro = ("Dans le cadre de la mise en place de l'entretien régulier, une remise "
-                     "en état ponctuelle des parties communes pourra être réalisée selon les "
-                     "prestations suivantes :")
-            closing = ("Cette intervention fera l'objet d'une facturation ponctuelle, distincte "
-                       "du forfait mensuel d'entretien récurrent.")
-            blocks = [clone(heading_ref, f"Poste 2 – {titre_p2} ponctuelle")]
-            desc = (data.get("REMISE_DESCRIPTION") or "").strip()
-            if desc:
-                blocks.append(clone(body_ref, desc))
-            blocks.append(clone(body_ref, intro))
-            for op in (data.get("REMISE_PRESTATIONS") or []):
-                blocks.append(clone(bullet_ref, op) if bullet_ref is not None else clone(body_ref, f"-   {op}"))
-            blocks.append(clone(body_ref, closing))
-            for el in blocks:
-                fixed3._element.addprevious(el)
-
-        # 3) Bloc financier « Poste 2 » après le tableau financier (uniquement si prix)
-        if data.get("REMISE_A_PRIX"):
-            fin_table = None
-            for tb in doc.tables:
-                txt = norm(" ".join(c.text for row in tb.rows for c in row.cells))
-                if "forfaitaire mensuel" in txt or "proposition financiere" in txt:
-                    fin_table = tb
-                    break
-            if fin_table is not None:
-                fin_blocks = [
-                    clone(heading_ref, f"Poste 2 – {titre_p2} ponctuelle"),
-                    clone(body_ref, "Remise en état des parties communes"),
-                    clone(body_ref,
-                          f"Total ponctuel HT : {data.get('REMISE_HT', '')}     "
-                          f"TVA ({data.get('REMISE_TVA_TAUX', '')}) : {data.get('REMISE_TVA', '')}     "
-                          f"Total ponctuel TTC : {data.get('REMISE_TTC', '')}"),
-                    clone(body_ref,
-                          "Cette intervention fait l'objet d'une facturation ponctuelle, "
-                          "distincte du forfait mensuel d'entretien récurrent."),
-                ]
-                cursor = fin_table._tbl
-                for el in fin_blocks:
-                    cursor.addnext(el)
-                    cursor = el
-
     expand_options_tables()
     apply_zone_visibility()
     apply_visible_zone_operation_filters()
     insert_free_prestations()
-    insert_postes_remise_etat()
     trim_empty_paragraphs_after_selected_zones()
     paginate_visible_zone_blocks()
     apply_bureau_zone_content()

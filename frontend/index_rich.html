@@ -7160,129 +7160,8 @@ function renderPrestationsContrat(body, m, code) {
     ` : ""}
 
     <div class="zone-list" id="zone-list"></div>
-    <div id="remise-etat-block"></div>
   `;
   renderZones();
-  renderRemiseEtat();
-}
-
-// ---- POSTE 2 — Remise en état ponctuelle (récurrent) ----
-function _ensureRemiseEtat() {
-  if (!state.devis.remise_etat || typeof state.devis.remise_etat !== "object") {
-    state.devis.remise_etat = { actif: false, titre: "Remise en état", description: "", prestations: [], prix_ht: null, tva: 20 };
-  }
-  const r = state.devis.remise_etat;
-  if (!Array.isArray(r.prestations)) r.prestations = [];
-  if (r.tva == null || r.tva === "") r.tva = 20;
-  return r;
-}
-
-function renderRemiseEtat() {
-  const host = document.getElementById("remise-etat-block");
-  if (!host) return;
-  const r = _ensureRemiseEtat();
-  const prixHt = (r.prix_ht != null && r.prix_ht !== "") ? Number(r.prix_ht) : null;
-  const tvaRate = (Number(r.tva) || 0) / 100;
-  const ttc = (prixHt != null && isFinite(prixHt)) ? (prixHt * (1 + tvaRate)) : null;
-  const fmt = (n) => (Number(n) || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
-  host.innerHTML = `
-    <div class="zone-block" style="margin-top:16px;border:2px solid ${r.actif ? "#b3741f" : "#e2ddd2"};border-radius:12px;overflow:hidden">
-      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px 14px;background:${r.actif ? "#fbf3e6" : "#faf9f6"};font:600 14px Arial;color:#3a352c">
-        <input type="checkbox" ${r.actif ? "checked" : ""} onchange="toggleRemiseEtat(this.checked)">
-        Ajouter un Poste 2 – Remise en état ponctuelle
-        <span style="font-weight:400;color:#8c877c;font-size:12px">(intervention ponctuelle, distincte du forfait mensuel)</span>
-      </label>
-      ${r.actif ? `
-      <div style="padding:14px;display:flex;flex-direction:column;gap:12px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <label style="font:11px Arial;color:#8c877c">Titre du poste
-            <input value="${escapeHtml(r.titre || "")}" oninput="setRemiseField('titre', this.value)"
-              style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-          <label style="font:11px Arial;color:#8c877c">Prix HT ponctuel (€) <span style="color:#b3741f">— laissez vide = descriptif, sans coût</span>
-            <input type="number" min="0" step="0.01" value="${prixHt != null ? prixHt : ""}" placeholder="ex : 950"
-              oninput="setRemiseField('prix_ht', this.value)"
-              style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-        </div>
-        <label style="font:11px Arial;color:#8c877c">Description (optionnelle)
-          <input value="${escapeHtml(r.description || "")}" oninput="setRemiseField('description', this.value)"
-            placeholder="ex : Remise en état des parties communes avant mise en place de l'entretien régulier"
-            style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-
-        <div style="border:1px dashed #d8d3c8;border-radius:8px;padding:10px 12px;background:#fafaf8">
-          <div style="font:600 12px Arial;color:#3a352c;margin-bottom:6px">Prestations de remise en état</div>
-          ${(r.prestations || []).length ? `
-            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
-              ${(r.prestations || []).map((pl, k) => `
-                <div style="display:flex;align-items:center;gap:8px;font:12px Arial;color:#3a352c">
-                  <span style="flex:1">•&nbsp;${escapeHtml(pl)}</span>
-                  <button class="btn btn--ghost btn--sm" title="Supprimer" onclick="removeRemisePrestation(${k})">✕</button>
-                </div>`).join("")}
-            </div>` : ""}
-          <div style="display:flex;gap:8px">
-            <input type="text" id="remise-input" placeholder="ex : Décrassage des sols, Lessivage des portes…"
-              onkeydown="if(event.key==='Enter'){event.preventDefault();addRemisePrestation();}"
-              style="flex:1;min-width:0;font:12px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px">
-            <button class="btn btn--ghost btn--sm" onclick="addRemisePrestation()">Ajouter</button>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end">
-          <label style="font:11px Arial;color:#8c877c">TVA (%)
-            <input type="number" min="0" step="0.1" value="${r.tva}" oninput="setRemiseField('tva', this.value)"
-              style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-          <div style="font:11px Arial;color:#8c877c">Total ponctuel HT
-            <div style="font:700 14px Arial;color:#3a352c;padding:7px 0">${prixHt != null ? fmt(prixHt) : "—"}</div></div>
-          <div style="font:11px Arial;color:#8c877c">Total ponctuel TTC
-            <div style="font:700 14px Arial;color:#b3741f;padding:7px 0">${ttc != null ? fmt(ttc) : "—"}</div></div>
-        </div>
-        <div style="font:11px Arial;color:#8c877c">Ce poste n'est facturé que si un prix HT est renseigné. Il n'entre jamais dans le total mensuel du Poste 1.</div>
-      </div>` : ""}
-    </div>`;
-}
-
-function toggleRemiseEtat(on) {
-  const r = _ensureRemiseEtat();
-  r.actif = !!on;
-  renderRemiseEtat();
-  if (typeof updatePreview === "function") updatePreview();
-  if (typeof saveDraft === "function") saveDraft();
-}
-
-function setRemiseField(key, value) {
-  const r = _ensureRemiseEtat();
-  if (key === "prix_ht") {
-    const n = parseFloat(value);
-    r.prix_ht = (value === "" || !isFinite(n)) ? null : n;
-    renderRemiseEtat();
-  } else if (key === "tva") {
-    r.tva = (value === "" ? 0 : Number(value));
-    renderRemiseEtat();
-  } else {
-    r[key] = value;
-  }
-  if (typeof updatePreview === "function") updatePreview();
-  if (typeof saveDraft === "function") saveDraft();
-}
-
-function addRemisePrestation() {
-  const input = document.getElementById("remise-input");
-  if (!input) return;
-  const val = (input.value || "").trim();
-  if (!val) return;
-  const r = _ensureRemiseEtat();
-  r.prestations.push(val);
-  input.value = "";
-  renderRemiseEtat();
-  if (typeof updatePreview === "function") updatePreview();
-  if (typeof saveDraft === "function") saveDraft();
-}
-
-function removeRemisePrestation(k) {
-  const r = _ensureRemiseEtat();
-  r.prestations.splice(k, 1);
-  renderRemiseEtat();
-  if (typeof updatePreview === "function") updatePreview();
-  if (typeof saveDraft === "function") saveDraft();
 }
 
 function renderBureauxTypologie() {
@@ -12457,19 +12336,6 @@ function onGabaritChange() {
       })(),
       zones_selectionnees: zonesSelectionnees,
       zones_detail: zonesDetail,
-      // Poste 2 — Remise en état ponctuelle (distinct du forfait mensuel).
-      remise_etat: (function () {
-        const r = state.devis.remise_etat;
-        if (!r || !r.actif) return { actif: false };
-        return {
-          actif: true,
-          titre: v(r.titre || "Remise en état"),
-          description: v(r.description || ""),
-          prestations: Array.isArray(r.prestations) ? r.prestations.map(x => v(x)).filter(x => x && x.trim()) : [],
-          prix_ht: (r.prix_ht != null && r.prix_ht !== "") ? r.prix_ht : null,
-          tva: (r.tva != null && r.tva !== "") ? r.tva : 20,
-        };
-      })(),
     };
   }
 

@@ -376,10 +376,6 @@ class DevisPayload(BaseModel):
     # [{code, titre, frequence, option_active, option_libelle, option_frequence, option_prix_ht}]
     # Seules les zones cochées y figurent ; le tableau est construit à partir de ça.
     zones_detail: List[Dict[str, Any]] = []
-    # Poste 2 — Remise en état PONCTUELLE (récurrent copro). Distinct du forfait
-    # mensuel (Poste 1). N'est facturé QUE si prix_ht est renseigné.
-    # {actif, titre, description, prestations:[...], prix_ht, tva}
-    remise_etat: Dict[str, Any] = {}
 
 
 @router.post("/calculer")
@@ -857,33 +853,6 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
     data.setdefault("PRIX_HT", financial["total_ht_fmt"])
     data.setdefault("TVA", financial["total_tva_fmt"])
     data.setdefault("PRIX_TTC", financial["total_ttc_fmt"])
-    # Poste 2 — Remise en état PONCTUELLE. Calcul totalement séparé du forfait
-    # mensuel (Poste 1) : il n'entre jamais dans res / financial / TOTAL_*.
-    # Facturé UNIQUEMENT si un prix HT est renseigné (sinon purement descriptif).
-    re_data = payload.remise_etat if isinstance(payload.remise_etat, dict) else {}
-    if re_data.get("actif"):
-        data["REMISE_ACTIF"] = True
-        data["REMISE_TITRE"] = str(re_data.get("titre") or "Remise en état").strip()
-        data["REMISE_DESCRIPTION"] = str(re_data.get("description") or "").strip()
-        data["REMISE_PRESTATIONS"] = [
-            str(x).strip() for x in (re_data.get("prestations") or []) if str(x).strip()
-        ]
-        prix_ht = _parse_float_fr(re_data.get("prix_ht"), 0.0)
-        if prix_ht > 0:
-            taux = _parse_float_fr(re_data.get("tva"), payload.taux_tva * 100)
-            taux_rate = taux / 100 if taux > 1 else taux
-            montant_tva = round(prix_ht * taux_rate, 2)
-            ttc = round(prix_ht + montant_tva, 2)
-            data["REMISE_A_PRIX"] = True
-            data["REMISE_HT"] = P.fmt_euros(prix_ht)
-            data["REMISE_TVA"] = P.fmt_euros(montant_tva)
-            data["REMISE_TTC"] = P.fmt_euros(ttc)
-            data["REMISE_TVA_TAUX"] = _fmt_taux_tva(taux_rate)
-        else:
-            data["REMISE_A_PRIX"] = False
-    else:
-        data["REMISE_ACTIF"] = False
-
     # Phase 2B : photos des équipements sélectionnés (texte + image alignés)
     if session is not None:
         photos = _resoudre_photos(payload, session)
