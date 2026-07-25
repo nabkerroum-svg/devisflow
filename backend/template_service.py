@@ -2900,36 +2900,58 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 fixed3 = p
                 break
         if fixed3 is not None:
-            from docx.shared import Cm as _Cm
+            from docx.shared import Cm as _Cm, Pt as _Pt
+            from docx.oxml import OxmlElement as _OxE
+            from docx.oxml.ns import qn as _qn
             import os as _os
+            _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
             intro = (data.get("REMISE_INTRO") or
                      "Avant de démarrer la prestation de décapage / dégraissage, les supports "
                      "et/ou revêtements seront dépoussiérés et balayés. Les points de contacts "
                      "seront également nettoyés et désinfectés.")
-            closing = ("Cette intervention fera l'objet d'une facturation ponctuelle, distincte "
-                       "du forfait mensuel d'entretien récurrent.")
 
-            def emit(text, ref):
-                fixed3._element.addprevious(clone(ref, text))
+            def _set_spacing(el, before=None, after=None):
+                """Espacement avant/après (en points) sur un paragraphe cloné,
+                pour aérer le Poste 2 comme dans le devis type remise en état."""
+                pPr = el.find(_W + "pPr")
+                if pPr is None:
+                    pPr = _OxE("w:pPr"); el.insert(0, pPr)
+                sp = pPr.find(_W + "spacing")
+                if sp is None:
+                    sp = _OxE("w:spacing"); pPr.append(sp)
+                if before is not None:
+                    sp.set(_qn("w:before"), str(int(before * 20)))
+                if after is not None:
+                    sp.set(_qn("w:after"), str(int(after * 20)))
+
+            def emit(text, ref, before=None, after=None):
+                el = clone(ref, text)
+                if before is not None or after is not None:
+                    _set_spacing(el, before, after)
+                fixed3._element.addprevious(el)
 
             def emit_bullet(text):
                 if bullet_ref is not None:
-                    emit(text, bullet_ref)
+                    emit(text, bullet_ref, after=2)
                 else:
-                    emit(f"-   {text}", body_ref)
+                    emit(f"-   {text}", body_ref, after=2)
 
             def emit_photo(path):
                 try:
                     pp = fixed3.insert_paragraph_before("")
-                    pp.add_run().add_picture(str(path), width=_Cm(5))
+                    pp.paragraph_format.space_before = _Pt(6)
+                    pp.paragraph_format.space_after = _Pt(4)
+                    pp.add_run().add_picture(str(path), width=_Cm(4.5))
                 except Exception:
                     pass
 
-            emit(f"Poste 2 – {titre_p2_h}", heading_ref)
+            # Espacements : titre → intro → chaque zone (respiration avant le titre)
+            # → puces (petit espace après chacune), comme dans le devis type.
+            emit(f"Poste 2 – {titre_p2_h}", heading_ref, before=16, after=8)
             desc = (data.get("REMISE_DESCRIPTION") or "").strip()
             if desc:
-                emit(desc, body_ref)
-            emit(intro, body_ref)
+                emit(desc, body_ref, after=6)
+            emit(intro, body_ref, after=10)
 
             zones = data.get("REMISE_ZONES")
             if isinstance(zones, list) and zones:
@@ -2937,7 +2959,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 for z in zones:
                     lbl = str(z.get("label") or "").strip()
                     if lbl:
-                        emit(lbl, heading_ref)  # titre de zone (gras)
+                        emit(lbl, heading_ref, before=12, after=4)  # titre de zone (gras)
                     for op in (z.get("operations") or []):
                         emit_bullet(op)
                     for ph in (z.get("photos") or []):
@@ -2947,8 +2969,8 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 # Rétrocompat : ancienne liste plate.
                 for op in (data.get("REMISE_PRESTATIONS") or []):
                     emit_bullet(op)
-
-            emit(closing, body_ref)
+            # La phrase de clôture (facturation ponctuelle) est déplacée à la fin
+            # du bloc « 3 – Moyens humains et matériels » (voir plus bas).
 
         # 3) Bloc financier « Poste 2 » après le tableau financier (uniquement si prix)
         if data.get("REMISE_A_PRIX"):
@@ -2975,13 +2997,12 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     cursor.addnext(el)
                     cursor = el
 
-    def insert_encart_materiel_remise():
-        """Encart DESCRIPTIF du matériel mobilisé — inséré après le Poste 2
-        (remise en état), avant la page fixe « 3 - Prestations complémentaires ».
-        Purement descriptif : texte auto + photos des machines, AUCUN prix. Ne
-        s'affiche que si des machines sont sélectionnées (MATERIEL_SELECTIONNE)."""
-        mats = [m for m in (data.get("MATERIEL_SELECTIONNE") or []) if isinstance(m, dict)]
-        if not mats:
+    def insert_moyens_humains_materiels():
+        """Bloc « 3 – Moyens humains et matériels » (repris du devis type remise
+        en état). Inséré après le détail Poste 2, avant la page fixe 3. Descriptif :
+        moyens type + équipements SÉLECTIONNÉS dans l'interface + photos + phrase de
+        clôture. AUCUN prix. Affiché uniquement quand le Poste 2 est actif."""
+        if not data.get("REMISE_ACTIF"):
             return
         fixed3 = None
         for p in doc.paragraphs:
@@ -2994,67 +3015,59 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         import os as _os
 
+        def para(text="", bold=False, size=10, before=0, after=2, bullet=False):
+            p = fixed3.insert_paragraph_before("")
+            p.paragraph_format.space_before = Pt(before)
+            p.paragraph_format.space_after = Pt(after)
+            r = p.add_run(("-   " + text) if bullet else text)
+            r.font.name = "Arial"
+            r.font.size = Pt(size)
+            r.bold = bold
+            return p
+
+        MOYENS = [
+            "Suivi assuré par l'Inspecteur et le chef d'équipe pour la mise en place du chantier, "
+            "le contrôle régulier et la validation de la prestation de chaque bâtiment avec un "
+            "membre du Conseil Syndical",
+            "Techniciens qualifiés",
+            "Monobrosse « industrielle »",
+            "Monobrosse spécifique marches et contremarches",
+            "Aspirateurs à eau",
+            "Véhicule d'intervention équipé",
+            "Dégraissant / décapant puissant",
+            "Nécessité d'avoir accès à un branchement électrique et un point d'eau",
+        ]
+        para("3 – Moyens humains et matériels", bold=True, size=12, before=16, after=6)
+        for m in MOYENS:
+            para(m, bullet=True, size=10, after=2)
+
+        # Équipements sélectionnés dans l'interface, ajoutés en bas du bloc.
+        mats = [m for m in (data.get("MATERIEL_SELECTIONNE") or []) if isinstance(m, dict)]
         names = [str(m.get("label") or m.get("code") or "").strip() for m in mats
                  if str(m.get("label") or m.get("code") or "").strip()]
+        if names:
+            para("Équipements mobilisés :", bold=True, size=10, before=8, after=2)
+            for n in names:
+                para(n, bullet=True, size=10, after=2)
+            # Photos des équipements : propres, non collées, taille adaptée.
+            photo_paths = [m.get("photo_path") for m in mats
+                           if m.get("photo_path") and _os.path.exists(str(m.get("photo_path")))]
+            if photo_paths:
+                pp = fixed3.insert_paragraph_before("")
+                pp.paragraph_format.space_before = Pt(8)
+                pp.paragraph_format.space_after = Pt(4)
+                pp.alignment = WD_ALIGN_PARAGRAPH.RIGHT if len(photo_paths) == 1 else WD_ALIGN_PARAGRAPH.LEFT
+                width = Cm(4.2) if len(photo_paths) == 1 else (Cm(3.4) if len(photo_paths) <= 3 else Cm(2.8))
+                for pth in photo_paths:
+                    try:
+                        pp.add_run().add_picture(str(pth), width=width)
+                        pp.add_run("   ")
+                    except Exception:
+                        pass
 
-        def role_phrase(m):
-            lab = str(m.get("label") or "").lower()
-            desc = str(m.get("description") or "").strip()
-            roles = {
-                "monobrosse": "L'utilisation d'une monobrosse permettra de réaliser un nettoyage mécanique approfondi des sols afin d'améliorer le rendu final.",
-                "autolaveuse": "L'autolaveuse assurera un lavage mécanisé et un séchage des sols pour un résultat homogène.",
-                "aspirateur": "L'aspirateur eau et poussière garantira un dépoussiérage et une aspiration efficaces avant traitement.",
-                "haute pression": "Le nettoyeur haute pression permettra de décrasser les surfaces les plus encrassées.",
-                "injecteur": "L'injecteur-extracteur assurera un nettoyage en profondeur des surfaces textiles.",
-                "nebulisateur": "Le nébulisateur (DSVA) assurera une désinfection homogène des locaux.",
-                "perche": "La perche H2O permettra un nettoyage de la vitrerie en hauteur, sans traces.",
-                "echafaudage": "L'échafaudage roulant sécurisera les interventions en hauteur.",
-            }
-            import unicodedata as _u
-            labn = "".join(c for c in _u.normalize("NFKD", lab) if not _u.combining(c))
-            for k, v in roles.items():
-                if k in labn:
-                    return v
-            if desc:
-                return desc if desc.endswith(".") else desc + "."
-            return f"L'utilisation de {m.get('label', 'ce matériel')} contribuera à un résultat professionnel."
-
-        if len(mats) == 1:
-            intro = ("Pour cette intervention, nous mobiliserons le matériel adapté à la remise "
-                     "en état des parties communes. " + role_phrase(mats[0]))
-        else:
-            intro = ("Selon les besoins du chantier, plusieurs équipements pourront être mobilisés "
-                     "afin d'assurer une remise en état complète et adaptée aux supports : "
-                     + ", ".join(names) + ".")
-
-        # Titre discret (gras)
-        tp = fixed3.insert_paragraph_before("Matériel & équipements mobilisés")
-        if not tp.runs:
-            tp.add_run("")
-        tp.runs[0].bold = True
-        tp.runs[0].font.name = "Arial"
-        tp.runs[0].font.size = Pt(11)
-        # Texte descriptif
-        ip = fixed3.insert_paragraph_before(intro)
-        for r in ip.runs:
-            r.font.name = "Arial"
-            r.font.size = Pt(10)
-        # Photos (embarquées, DrawingML inline → compatibles Word)
-        photo_paths = [m.get("photo_path") for m in mats
-                       if m.get("photo_path") and _os.path.exists(str(m.get("photo_path")))]
-        if photo_paths:
-            pp = fixed3.insert_paragraph_before("")
-            # 1 machine → photo à droite ; plusieurs → photos alignées (ligne)
-            pp.alignment = WD_ALIGN_PARAGRAPH.RIGHT if len(mats) == 1 else WD_ALIGN_PARAGRAPH.LEFT
-            width = Cm(4.2) if len(photo_paths) == 1 else (Cm(3.6) if len(photo_paths) <= 3 else Cm(3.0))
-            for pth in photo_paths:
-                try:
-                    pp.add_run().add_picture(str(pth), width=width)
-                    pp.add_run("  ")
-                except Exception:
-                    pass
-        # petite respiration avant la page fixe
-        fixed3.insert_paragraph_before("")
+        # Phrase de clôture (facturation ponctuelle) — fin du Poste 2.
+        para("Cette intervention fera l'objet d'une facturation ponctuelle, distincte du forfait "
+             "mensuel d'entretien récurrent.", size=10, before=12, after=4)
 
     expand_options_tables()
     apply_zone_visibility()
@@ -3063,7 +3076,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
     insert_postes_remise_etat()
     trim_empty_paragraphs_after_selected_zones()
     paginate_visible_zone_blocks()
-    insert_encart_materiel_remise()
+    insert_moyens_humains_materiels()
     apply_bureau_zone_content()
     normalize_bureau_cgv_page_break()
     lock_fixed_section_starts()
