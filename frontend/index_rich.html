@@ -4247,7 +4247,8 @@ input, select, textarea {
                   <label class="info-field__label">Notre référence <span class="info-field__sub">(modifiable — saisissez le format que vous voulez)</span></label>
                   <input class="info-field__input" id="i-ref-devis" placeholder="ME-XXXX ou ME 6245" oninput="onDevisNumberChange()">
                 </div>
-                <div class="info-field">
+                <!-- Version : masquée de l'interface (valeur par défaut « v1 » conservée). -->
+                <div class="info-field" style="display:none">
                   <label class="info-field__label">Version</label>
                   <input class="info-field__input" id="i-version" value="v1" placeholder="v1" oninput="onInfoChange()">
                 </div>
@@ -4259,7 +4260,8 @@ input, select, textarea {
                   <label class="info-field__label">Commercial</label>
                   <select class="info-field__input" id="i-commercial" onchange="onInfoChange()"></select>
                 </div>
-                <div class="info-field">
+                <!-- Référence opportunité / Salesforce : masquée (valeur vide conservée). -->
+                <div class="info-field" style="display:none">
                   <label class="info-field__label">Référence opportunité / Salesforce</label>
                   <input class="info-field__input" id="i-salesforce" placeholder="SF-1182" oninput="onInfoChange()">
                 </div>
@@ -4267,7 +4269,8 @@ input, select, textarea {
                   <label class="info-field__label">Référence client</label>
                   <input class="info-field__input" id="i-ref-client" placeholder="OS-2026-458" oninput="onInfoChange()">
                 </div>
-                <div class="info-field">
+                <!-- Référence immeuble / site : masquée (valeur conservée si liée au chantier). -->
+                <div class="info-field" style="display:none">
                   <label class="info-field__label">Référence immeuble / site</label>
                   <input class="info-field__input" id="i-ref-site" placeholder="IMM-XXXX" oninput="onInfoChange()">
                 </div>
