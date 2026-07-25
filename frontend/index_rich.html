@@ -4275,7 +4275,9 @@ input, select, textarea {
                   <label class="info-field__label">Type de prestation</label>
                   <input class="info-field__input" id="i-type-prestation" readonly placeholder="— sera renseigné automatiquement —">
                 </div>
-                <div class="info-field">
+                <!-- Gabarit du devis : masqué de l'interface (valeur par défaut
+                     conservée dans le code pour la génération). -->
+                <div class="info-field" style="display:none">
                   <label class="info-field__label">Gabarit du devis <span class="info-field__sub">(charte graphique appliquée)</span></label>
                   <select class="info-field__input" id="i-gabarit" onchange="onGabaritChange()">
                     <!-- options injectées par renderGabaritSelector() -->
@@ -4447,8 +4449,11 @@ input, select, textarea {
             </div>
           </section>
 
-          <!-- Section 5 : Photos -->
-          <section class="section" id="s-photos">
+          <!-- Section 5 : Photos du chantier — MASQUÉE de l'interface (bloc global
+               inutile). Les éléments restent dans le DOM pour ne pas casser
+               setupPhotos/renderPhotos. Les photos par zone et Poste 2 sont un
+               autre système et ne sont PAS affectées. -->
+          <section class="section" id="s-photos" style="display:none">
             <div class="section__header">
               <div class="section__title"><span class="section__num">5</span>Photos du chantier</div>
               <div class="section__hint" id="s-photos-hint">Optionnel · glisser-déposer</div>
@@ -6267,7 +6272,7 @@ const state = {
     },
     totaux: { ht: 180, tva: 36, ttc: 216 },
     conditions_code: "",
-    date_emission: new Date().toISOString().slice(0, 10),
+    date_emission: todayISO(),
     date_effet: "",
     duree_contrat: "1 an",
     acompte_pct: 50,
@@ -6329,6 +6334,14 @@ function nextDevisNumber() {
   return "ME-" + (last + 1);
 }
 
+// Date du jour au format ISO (JJ local, pas UTC) → "AAAA-MM-JJ".
+function todayISO() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const j = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${j}`;
+}
+
 /* ============================================================
    INITIALISATION
    ============================================================ */
@@ -6354,6 +6367,17 @@ document.addEventListener("DOMContentLoaded", () => {
   restoreEnvoisFromStorage();
   restoreBiblioFromStorage();
   restoreDraft();
+
+  // Date d'émission : toujours à jour. Un brouillon restauré peut contenir une
+  // ancienne date → si elle est vide ou passée, on la remet à aujourd'hui. Une
+  // date volontairement fixée à aujourd'hui ou dans le futur est conservée.
+  if (!state.devis.date_emission || state.devis.date_emission < todayISO()) {
+    state.devis.date_emission = todayISO();
+  }
+  const _fdate = document.getElementById("f-date-emission");
+  if (_fdate) _fdate.value = state.devis.date_emission;
+  const _idate = document.getElementById("i-date-emission");
+  if (_idate) _idate.value = state.devis.date_emission;
 
   // Init listings
   renderDevisListing();
@@ -6839,7 +6863,7 @@ function newDevis() {
     },
     totaux: { ht: 180, tva: 36, ttc: 216 },
     conditions_code: "",
-    date_emission: new Date().toISOString().slice(0, 10),
+    date_emission: todayISO(),
     date_effet: "",
     duree_contrat: "1 an",
     acompte_pct: 50,
@@ -12382,7 +12406,7 @@ function onGabaritChange() {
 
     const variables = {
       NUMERO_DEVIS: v(dd.numero),
-      DATE_EMISSION: v(dd.date_emission),
+      DATE_EMISSION: v(dd.date_emission) || todayISO(),
       // Référence client saisie dans l'interface (peut être vide → non affichée)
       REF_CLIENT: v((dd.info && dd.info.ref_client) || ""),
       TYPE_PRESTATION: v((dd.info && dd.info.type_prestation) || (modeleMetier && modeleMetier.objet_principal) || ""),
@@ -12788,10 +12812,6 @@ function onGabaritChange() {
           <div style="font:600 13px Arial">${esc(item.libelle)}</div>
           <div style="font:11px Arial;color:#8c877c">${item.code?esc(catLabelOf(item.code)):"photo ajoutée"}${item.photo_data?" · photo perso":""}</div>
         </div>
-        <label style="font:11px Arial;color:#8c877c">Prestation :
-          <select class="me-eq-presta" style="font:12px Arial;padding:5px;border:1px solid #d8d3c8;border-radius:6px;max-width:220px">
-            ${presta.map(p=>`<option ${item.prestation===p?"selected":""}>${esc(p)}</option>`).join("")}
-          </select></label>
         ${item.photo_data ? `<div style="display:flex;gap:4px">
           <button type="button" class="me-eq-up me-btn-mini" title="Monter">↑</button>
           <button type="button" class="me-eq-down me-btn-mini" title="Descendre">↓</button>
@@ -12826,7 +12846,10 @@ function onGabaritChange() {
       host.querySelectorAll(".me-equip-row").forEach(r => {
         const i = +r.dataset.idx;
         r.querySelector(".me-eq-on").addEventListener("change", e => { model[i].on = e.target.checked; syncSelection(); });
-        r.querySelector(".me-eq-presta").addEventListener("change", e => { model[i].prestation = e.target.value; syncSelection(); });
+        // Menu « Prestation » retiré de l'interface : on garde le champ optionnel
+        // s'il existe encore, sans planter s'il est absent.
+        const _prestaSel = r.querySelector(".me-eq-presta");
+        if (_prestaSel) _prestaSel.addEventListener("change", e => { model[i].prestation = e.target.value; syncSelection(); });
         const up = r.querySelector(".me-eq-up");
         const down = r.querySelector(".me-eq-down");
         const del = r.querySelector(".me-eq-del");
