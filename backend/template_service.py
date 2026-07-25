@@ -2925,11 +2925,25 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 if after is not None:
                     sp.set(_qn("w:after"), str(int(after * 20)))
 
-            def emit(text, ref, before=None, after=None):
+            def _set_keep_next(el, keep_next=True):
+                """Ajoute keepLines (+ keepNext) sur un paragraphe cloné : évite
+                qu'il soit coupé, et le colle au paragraphe suivant si keep_next."""
+                pPr = el.find(_W + "pPr")
+                if pPr is None:
+                    pPr = _OxE("w:pPr"); el.insert(0, pPr)
+                if pPr.find(_W + "keepLines") is None:
+                    pPr.append(_OxE("w:keepLines"))
+                if keep_next and pPr.find(_W + "keepNext") is None:
+                    pPr.append(_OxE("w:keepNext"))
+
+            def emit(text, ref, before=None, after=None, keep_next=False):
                 el = clone(ref, text)
                 if before is not None or after is not None:
                     _set_spacing(el, before, after)
+                if keep_next:
+                    _set_keep_next(el, keep_next=True)
                 fixed3._element.addprevious(el)
+                return el
 
             def emit_bullet(text):
                 if bullet_ref is not None:
@@ -2946,10 +2960,30 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 except Exception:
                     pass
 
-            def title_para(text, before=0, after=4, size=11, keep_next=False):
+            def title_para(text, before=0, after=4, size=11, keep_next=False,
+                           page_break_before=False):
                 """Titre GRAS propre (Arial), SANS soulignement ni tabulation — on
                 ne clone pas le titre de zone Poste 1 (dont la tabulation soulignée
-                produisait un trait qui dépasse le texte)."""
+                produisait un trait qui dépasse le texte).
+
+                page_break_before : force le titre à démarrer sur une NOUVELLE page
+                (utilisé pour « Poste 2 » afin qu'il ne soit jamais coupé)."""
+                if page_break_before:
+                    # IMPORTANT : on force la nouvelle page via un SAUT DE PAGE DUR
+                    # (<w:br type=page>) placé dans un PARAGRAPHE VIDE DÉDIÉ, juste
+                    # avant le titre. Raisons :
+                    #  - la propriété page_break_before est SUPPRIMÉE par la
+                    #    normalisation LibreOffice (ré-export .docx) ;
+                    #  - un saut dur dans le MÊME paragraphe que le texte est lui
+                    #    aussi supprimé par LibreOffice ;
+                    #  - en revanche, un saut dur dans un paragraphe vide séparé est
+                    #    PRÉSERVÉ (c'est ainsi que les pages fixes du modèle basculent).
+                    from docx.enum.text import WD_BREAK as _WDB
+                    brk = fixed3.insert_paragraph_before("")
+                    brk.paragraph_format.space_before = _Pt(0)
+                    brk.paragraph_format.space_after = _Pt(0)
+                    brk.paragraph_format.keep_with_next = True
+                    brk.add_run().add_break(_WDB.PAGE)
                 p = fixed3.insert_paragraph_before("")
                 pf = p.paragraph_format
                 pf.space_before = _Pt(before)
@@ -2963,13 +2997,19 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 r.bold = True
                 return p
 
+            # Pagination explicite : le Poste 2 démarre TOUJOURS sur une nouvelle
+            # page propre (page_break_before), pour ne jamais être coupé ni collé
+            # en bas de la page du Poste 1. Le titre est collé (keep_with_next) à
+            # son introduction / première zone → le titre n'est jamais isolé en
+            # bas d'une page avec le contenu sur la suivante.
             # Espacements : titre → intro → chaque zone (respiration avant le titre)
             # → puces (petit espace après chacune), comme dans le devis type.
-            title_para(f"Poste 2 – {titre_p2_h}", before=16, after=8, size=12)
+            title_para(f"Poste 2 – {titre_p2_h}", before=0, after=8, size=12,
+                       keep_next=True, page_break_before=True)
             desc = (data.get("REMISE_DESCRIPTION") or "").strip()
             if desc:
-                emit(desc, body_ref, after=6)
-            emit(intro, body_ref, after=10)
+                emit(desc, body_ref, after=6, keep_next=True)
+            emit(intro, body_ref, after=10, keep_next=True)
 
             zones = data.get("REMISE_ZONES")
             if isinstance(zones, list) and zones:
