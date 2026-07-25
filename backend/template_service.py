@@ -1002,21 +1002,28 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
             if "reference client" in norm(p.text):
                 return docx_path
 
-        def make_ref_el(style_ref):
-            """Élément <w:p> « Référence client : … », en clonant le style d'un
-            paragraphe de référence quand c'est possible, sinon un paragraphe neuf."""
-            if style_ref is not None:
-                el = _copy.deepcopy(style_ref._element)
-                ts = list(el.iter(W + "t"))
-                if ts:
-                    ts[0].text = line
-                    for t in ts[1:]:
-                        t.text = ""
-                    return el
+        def make_ref_el(style_ref=None):
+            """Élément <w:p> « Référence client : … » : aligné à GAUCHE (marge),
+            en GRAS, taille 16 pt, sans indentation. On ne clone pas « Proposition »
+            (qui est indenté/centré) pour placer la référence tout à gauche."""
             from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn as _qn
             p = OxmlElement("w:p")
+            pPr = OxmlElement("w:pPr")
+            jc = OxmlElement("w:jc"); jc.set(_qn("w:val"), "left"); pPr.append(jc)
+            ind = OxmlElement("w:ind")
+            ind.set(_qn("w:left"), "0"); ind.set(_qn("w:firstLine"), "0")
+            pPr.append(ind)
+            p.append(pPr)
             r = OxmlElement("w:r")
+            rPr = OxmlElement("w:rPr")
+            rf = OxmlElement("w:rFonts"); rf.set(_qn("w:ascii"), "Arial"); rf.set(_qn("w:hAnsi"), "Arial")
+            rPr.append(rf)
+            rPr.append(OxmlElement("w:b"))           # gras
+            sz = OxmlElement("w:sz"); sz.set(_qn("w:val"), "32"); rPr.append(sz)   # 16 pt (demi-points)
+            r.append(rPr)
             t = OxmlElement("w:t")
+            t.set(_qn("xml:space"), "preserve")
             t.text = line
             r.append(t)
             p.append(r)
@@ -2932,6 +2939,87 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     cursor.addnext(el)
                     cursor = el
 
+    def insert_encart_materiel_remise():
+        """Encart DESCRIPTIF du matériel mobilisé — inséré après le Poste 2
+        (remise en état), avant la page fixe « 3 - Prestations complémentaires ».
+        Purement descriptif : texte auto + photos des machines, AUCUN prix. Ne
+        s'affiche que si des machines sont sélectionnées (MATERIEL_SELECTIONNE)."""
+        mats = [m for m in (data.get("MATERIEL_SELECTIONNE") or []) if isinstance(m, dict)]
+        if not mats:
+            return
+        fixed3 = None
+        for p in doc.paragraphs:
+            if "prestations complementaires" in norm(p.text):
+                fixed3 = p
+                break
+        if fixed3 is None:
+            return
+        from docx.shared import Pt, Cm
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        import os as _os
+
+        names = [str(m.get("label") or m.get("code") or "").strip() for m in mats
+                 if str(m.get("label") or m.get("code") or "").strip()]
+
+        def role_phrase(m):
+            lab = str(m.get("label") or "").lower()
+            desc = str(m.get("description") or "").strip()
+            roles = {
+                "monobrosse": "L'utilisation d'une monobrosse permettra de réaliser un nettoyage mécanique approfondi des sols afin d'améliorer le rendu final.",
+                "autolaveuse": "L'autolaveuse assurera un lavage mécanisé et un séchage des sols pour un résultat homogène.",
+                "aspirateur": "L'aspirateur eau et poussière garantira un dépoussiérage et une aspiration efficaces avant traitement.",
+                "haute pression": "Le nettoyeur haute pression permettra de décrasser les surfaces les plus encrassées.",
+                "injecteur": "L'injecteur-extracteur assurera un nettoyage en profondeur des surfaces textiles.",
+                "nebulisateur": "Le nébulisateur (DSVA) assurera une désinfection homogène des locaux.",
+                "perche": "La perche H2O permettra un nettoyage de la vitrerie en hauteur, sans traces.",
+                "echafaudage": "L'échafaudage roulant sécurisera les interventions en hauteur.",
+            }
+            import unicodedata as _u
+            labn = "".join(c for c in _u.normalize("NFKD", lab) if not _u.combining(c))
+            for k, v in roles.items():
+                if k in labn:
+                    return v
+            if desc:
+                return desc if desc.endswith(".") else desc + "."
+            return f"L'utilisation de {m.get('label', 'ce matériel')} contribuera à un résultat professionnel."
+
+        if len(mats) == 1:
+            intro = ("Pour cette intervention, nous mobiliserons le matériel adapté à la remise "
+                     "en état des parties communes. " + role_phrase(mats[0]))
+        else:
+            intro = ("Selon les besoins du chantier, plusieurs équipements pourront être mobilisés "
+                     "afin d'assurer une remise en état complète et adaptée aux supports : "
+                     + ", ".join(names) + ".")
+
+        # Titre discret (gras)
+        tp = fixed3.insert_paragraph_before("Matériel & équipements mobilisés")
+        if not tp.runs:
+            tp.add_run("")
+        tp.runs[0].bold = True
+        tp.runs[0].font.name = "Arial"
+        tp.runs[0].font.size = Pt(11)
+        # Texte descriptif
+        ip = fixed3.insert_paragraph_before(intro)
+        for r in ip.runs:
+            r.font.name = "Arial"
+            r.font.size = Pt(10)
+        # Photos (embarquées, DrawingML inline → compatibles Word)
+        photo_paths = [m.get("photo_path") for m in mats
+                       if m.get("photo_path") and _os.path.exists(str(m.get("photo_path")))]
+        if photo_paths:
+            pp = fixed3.insert_paragraph_before("")
+            # 1 machine → photo à droite ; plusieurs → photos alignées (ligne)
+            pp.alignment = WD_ALIGN_PARAGRAPH.RIGHT if len(mats) == 1 else WD_ALIGN_PARAGRAPH.LEFT
+            width = Cm(4.2) if len(photo_paths) == 1 else (Cm(3.6) if len(photo_paths) <= 3 else Cm(3.0))
+            for pth in photo_paths:
+                try:
+                    pp.add_run().add_picture(str(pth), width=width)
+                    pp.add_run("  ")
+                except Exception:
+                    pass
+        # petite respiration avant la page fixe
+        fixed3.insert_paragraph_before("")
+
     expand_options_tables()
     apply_zone_visibility()
     apply_visible_zone_operation_filters()
@@ -2939,6 +3027,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
     insert_postes_remise_etat()
     trim_empty_paragraphs_after_selected_zones()
     paginate_visible_zone_blocks()
+    insert_encart_materiel_remise()
     apply_bureau_zone_content()
     normalize_bureau_cgv_page_break()
     lock_fixed_section_starts()
