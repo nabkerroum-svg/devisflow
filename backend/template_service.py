@@ -1100,6 +1100,7 @@ def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
     if template_stem in COPRO_PETITE_TEMPLATE_CODES:
         _generer_copro_petite_preserve_layout(template_path, data, output_path)
         _inserer_reference_client(output_path, data.get("REF_CLIENT"))
+        _supprimer_pages_vides(output_path)
         return _normaliser_images_word_compat(output_path)
     if template_stem == "bureaux_petit":
         _generer_bureaux_petit_preserve_layout(template_path, data, output_path)
@@ -4362,6 +4363,110 @@ def _compacter_paragraphes_vides(docx_path: Path, max_consecutifs: int = 0):
         body.remove(p_el)
     if a_suppr:
         d.save(str(docx_path))
+
+
+def _supprimer_pages_vides(docx_path: Path) -> Path:
+    """Supprime les pages « fantômes » (uniquement logo d'en-tête + filigrane +
+    pied de page, sans contenu métier) du document généré.
+
+    Cause de ces pages : des accumulations de paragraphes vides (parfois une
+    dizaine à la suite, éventuellement suivies d'un saut de page dur) remplissent
+    une page entière de lignes blanches. La page ne porte alors aucun texte utile
+    et n'affiche que les éléments fixes de gabarit (logo, filigrane, pied de page).
+
+    Nettoyage PRUDENT — on ne supprime jamais de contenu réel :
+    - on n'agit qu'à partir du « détail des prestations » (la couverture et la
+      page de présentation, qui utilisent des vides pour leur mise en page, sont
+      intégralement préservées) ;
+    - un paragraphe portant du texte, une image, un tableau ou un saut de ligne /
+      de page est considéré comme NON vide : il n'est jamais retiré et il borne
+      les suites de vides ;
+    - juste avant un saut de page (page_break_before ou saut dur), les vides
+      superflus sont retirés : le saut suffit à séparer les blocs ;
+    - ailleurs, on conserve au plus un paragraphe vide (interligne d'aération).
+
+    Idempotente : relancée sur un document déjà nettoyé, elle ne change rien.
+    """
+    from docx import Document as _Doc
+    from docx.oxml.ns import qn
+    import unicodedata as _ud
+
+    d = _Doc(str(docx_path))
+    body = d.element.body
+
+    def _norm(t):
+        t = (t or "").lower().replace("\xa0", " ")
+        t = _ud.normalize("NFKD", t)
+        t = "".join(c for c in t if not _ud.combining(c))
+        return re.sub(r"\s+", " ", t).strip()
+
+    def est_vide(p):
+        # Vide = aucun texte réel, ni image / pict / saut de ligne / saut de page
+        # NULLE PART dans le paragraphe (on scanne tout l'arbre, pas seulement les
+        # runs : une image ancrée ou flottante hors <w:r> reste ainsi protégée et
+        # ne peut jamais être prise pour un paragraphe vide).
+        if p.findall(".//" + qn("w:drawing")) or p.findall(".//" + qn("w:pict")):
+            return False
+        if p.findall(".//" + qn("w:br")):
+            return False
+        for t in p.findall(".//" + qn("w:t")):
+            if (t.text or "").strip():
+                return False
+        return True
+
+    def est_saut(p):
+        ppr = p.find(qn("w:pPr"))
+        if ppr is not None and ppr.find(qn("w:pageBreakBefore")) is not None:
+            return True
+        for br in p.findall(".//" + qn("w:br")):
+            if br.get(qn("w:type")) == "page":
+                return True
+        return False
+
+    children = [c for c in body if c.tag in (qn("w:p"), qn("w:tbl"))]
+    n = len(children)
+
+    # Ancre de départ : le détail des prestations. Tant qu'on ne l'a pas trouvée,
+    # on ne touche à rien (protège la couverture / la présentation). Si l'ancre est
+    # absente (structure inattendue), on s'abstient totalement.
+    start = None
+    for i, c in enumerate(children):
+        if c.tag != qn("w:p"):
+            continue
+        txt = _norm("".join(t.text or "" for t in c.findall(".//" + qn("w:t"))))
+        if ("detail des prestations" in txt or "detail et frequences" in txt):
+            start = i
+            break
+    if start is None:
+        return docx_path
+
+    a_suppr = []
+    i = start
+    while i < n:
+        c = children[i]
+        if c.tag == qn("w:p") and est_vide(c):
+            j = i
+            while j < n and children[j].tag == qn("w:p") and est_vide(children[j]):
+                j += 1
+            run = children[i:j]
+            suivant = children[j] if j < n else None
+            devant_saut = (
+                suivant is not None
+                and suivant.tag == qn("w:p")
+                and est_saut(suivant)
+            )
+            garder = 0 if devant_saut else 1
+            a_suppr.extend(run[garder:])
+            i = j
+        else:
+            i += 1
+
+    for p_el in a_suppr:
+        body.remove(p_el)
+    if a_suppr:
+        d.save(str(docx_path))
+        _nettoyer_doublons_zip(docx_path)
+    return docx_path
 
 
 def _docx_contient_marqueur(docx_path: Path, marqueur: str) -> bool:
