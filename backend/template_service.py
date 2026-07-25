@@ -2945,9 +2945,26 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 except Exception:
                     pass
 
+            def title_para(text, before=0, after=4, size=11, keep_next=False):
+                """Titre GRAS propre (Arial), SANS soulignement ni tabulation — on
+                ne clone pas le titre de zone Poste 1 (dont la tabulation soulignée
+                produisait un trait qui dépasse le texte)."""
+                p = fixed3.insert_paragraph_before("")
+                pf = p.paragraph_format
+                pf.space_before = _Pt(before)
+                pf.space_after = _Pt(after)
+                pf.keep_together = True
+                if keep_next:
+                    pf.keep_with_next = True
+                r = p.add_run(text)
+                r.font.name = "Arial"
+                r.font.size = _Pt(size)
+                r.bold = True
+                return p
+
             # Espacements : titre → intro → chaque zone (respiration avant le titre)
             # → puces (petit espace après chacune), comme dans le devis type.
-            emit(f"Poste 2 – {titre_p2_h}", heading_ref, before=16, after=8)
+            title_para(f"Poste 2 – {titre_p2_h}", before=16, after=8, size=12)
             desc = (data.get("REMISE_DESCRIPTION") or "").strip()
             if desc:
                 emit(desc, body_ref, after=6)
@@ -2959,7 +2976,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 for z in zones:
                     lbl = str(z.get("label") or "").strip()
                     if lbl:
-                        emit(lbl, heading_ref, before=12, after=4)  # titre de zone (gras)
+                        title_para(lbl, before=12, after=4, size=11, keep_next=True)
                     for op in (z.get("operations") or []):
                         emit_bullet(op)
                     for ph in (z.get("photos") or []):
@@ -3015,33 +3032,33 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         import os as _os
 
-        def para(text="", bold=False, size=10, before=0, after=2, bullet=False):
+        # keep_next enchaîne keepNext/keepLines sur tout le bloc : Word/LibreOffice
+        # le garde d'un seul tenant et le bascule proprement sur une nouvelle page
+        # s'il ne tient pas, au lieu de le couper (titre/liste/photos séparés).
+        def para(text="", bold=False, size=10, before=0, after=2, bullet=False, keep_next=True):
             p = fixed3.insert_paragraph_before("")
-            p.paragraph_format.space_before = Pt(before)
-            p.paragraph_format.space_after = Pt(after)
+            pf = p.paragraph_format
+            pf.space_before = Pt(before)
+            pf.space_after = Pt(after)
+            pf.keep_together = True
+            if keep_next:
+                pf.keep_with_next = True
             r = p.add_run(("-   " + text) if bullet else text)
             r.font.name = "Arial"
             r.font.size = Pt(size)
             r.bold = bold
             return p
 
+        # Moyens HUMAINS uniquement (les équipements viennent de la sélection).
         MOYENS = [
-            "Suivi assuré par l'Inspecteur et le chef d'équipe pour la mise en place du chantier, "
-            "le contrôle régulier et la validation de la prestation de chaque bâtiment avec un "
-            "membre du Conseil Syndical",
+            "Suivi assuré par l'Inspecteur et le chef d'équipe pour la mise en place du chantier",
             "Techniciens qualifiés",
-            "Monobrosse « industrielle »",
-            "Monobrosse spécifique marches et contremarches",
-            "Aspirateurs à eau",
-            "Véhicule d'intervention équipé",
-            "Dégraissant / décapant puissant",
-            "Nécessité d'avoir accès à un branchement électrique et un point d'eau",
         ]
         para("3 – Moyens humains et matériels", bold=True, size=12, before=16, after=6)
         for m in MOYENS:
             para(m, bullet=True, size=10, after=2)
 
-        # Équipements sélectionnés dans l'interface, ajoutés en bas du bloc.
+        # Équipements : UNIQUEMENT ceux réellement sélectionnés dans l'interface.
         mats = [m for m in (data.get("MATERIEL_SELECTIONNE") or []) if isinstance(m, dict)]
         names = [str(m.get("label") or m.get("code") or "").strip() for m in mats
                  if str(m.get("label") or m.get("code") or "").strip()]
@@ -3049,13 +3066,16 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
             para("Équipements mobilisés :", bold=True, size=10, before=8, after=2)
             for n in names:
                 para(n, bullet=True, size=10, after=2)
-            # Photos des équipements : propres, non collées, taille adaptée.
+            # Photos des équipements : propres, non collées, taille adaptée, gardées
+            # avec le bloc (pas de photo coupée ni séparée de sa liste).
             photo_paths = [m.get("photo_path") for m in mats
                            if m.get("photo_path") and _os.path.exists(str(m.get("photo_path")))]
             if photo_paths:
                 pp = fixed3.insert_paragraph_before("")
                 pp.paragraph_format.space_before = Pt(8)
                 pp.paragraph_format.space_after = Pt(4)
+                pp.paragraph_format.keep_together = True
+                pp.paragraph_format.keep_with_next = True
                 pp.alignment = WD_ALIGN_PARAGRAPH.RIGHT if len(photo_paths) == 1 else WD_ALIGN_PARAGRAPH.LEFT
                 width = Cm(4.2) if len(photo_paths) == 1 else (Cm(3.4) if len(photo_paths) <= 3 else Cm(2.8))
                 for pth in photo_paths:
@@ -3065,9 +3085,9 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     except Exception:
                         pass
 
-        # Phrase de clôture (facturation ponctuelle) — fin du Poste 2.
+        # Phrase de clôture (facturation ponctuelle) — fin du bloc (dernier para).
         para("Cette intervention fera l'objet d'une facturation ponctuelle, distincte du forfait "
-             "mensuel d'entretien récurrent.", size=10, before=12, after=4)
+             "mensuel d'entretien récurrent.", size=10, before=12, after=4, keep_next=False)
 
     expand_options_tables()
     apply_zone_visibility()
