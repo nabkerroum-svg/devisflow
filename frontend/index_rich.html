@@ -7166,15 +7166,104 @@ function renderPrestationsContrat(body, m, code) {
   renderRemiseEtat();
 }
 
-// ---- POSTE 2 — Remise en état ponctuelle (récurrent) ----
+// ---- POSTE 2 — Remise en état ponctuelle STRUCTURÉE PAR ZONES (récurrent) ----
+// Prestations reprises du devis type « 11_REMISE EN ETAT COPRO » (à partir de
+// « 2 - Détail des prestations »). Purement descriptif : aucune influence prix.
+const REMISE_ETAT_INTRO_DEFAUT = "Avant de démarrer la prestation de décapage / dégraissage, les supports et/ou revêtements seront dépoussiérés et balayés. Les points de contacts seront également nettoyés et désinfectés.";
+const _REMISE_OPS_STANDARD = [
+  "Application / pulvérisation d'un dégraissant / décapant puissant",
+  "« Détourage » manuel des bordures de paliers avec Pad",
+  "Décapage mécanique à la monobrosse",
+  "Aspiration des eaux sales",
+  "Rinçage",
+  "Neutralisation des sols",
+  "Finitions manuelles",
+];
+const REMISE_ETAT_ZONES_DEFAUT = [
+  { code: "hall", label: "Hall", operations: [..._REMISE_OPS_STANDARD] },
+  { code: "paliers", label: "Paliers", operations: [..._REMISE_OPS_STANDARD] },
+  { code: "escaliers", label: "Escaliers", operations: [
+    "Pulvérisation d'un dégraissant / décapant puissant sur les marches et contremarches",
+    "Application du dégraissant au pad sur les marches et contremarches",
+    "Brossage manuel avec PAD, notamment pour les angles et plinthes",
+    "Aspiration des eaux sales",
+    "Rinçage",
+    "Neutralisation des sols",
+    "Finitions manuelles",
+  ] },
+];
+
 function _ensureRemiseEtat() {
   if (!state.devis.remise_etat || typeof state.devis.remise_etat !== "object") {
-    state.devis.remise_etat = { actif: false, titre: "Remise en état", description: "", prestations: [], prix_ht: null, tva: 20 };
+    state.devis.remise_etat = { actif: false, titre: "Remise en état ponctuelle", description: "", intro: REMISE_ETAT_INTRO_DEFAUT, zones: [], prix_ht: null, tva: 20 };
   }
   const r = state.devis.remise_etat;
-  if (!Array.isArray(r.prestations)) r.prestations = [];
+  if (r.intro == null) r.intro = REMISE_ETAT_INTRO_DEFAUT;
   if (r.tva == null || r.tva === "") r.tva = 20;
+  if (!Array.isArray(r.zones) || !r.zones.length) {
+    r.zones = REMISE_ETAT_ZONES_DEFAUT.map(z => ({
+      code: z.code, label: z.label,
+      operations: [...z.operations],
+      ops_enabled: z.operations.map(() => true),
+      prestations_libres: [],
+      photo: null, photo_name: null,
+      expanded: true,
+    }));
+  }
+  r.zones.forEach(z => {
+    if (!Array.isArray(z.operations)) z.operations = [];
+    if (!Array.isArray(z.ops_enabled) || z.ops_enabled.length !== z.operations.length) z.ops_enabled = z.operations.map(() => true);
+    if (!Array.isArray(z.prestations_libres)) z.prestations_libres = [];
+  });
   return r;
+}
+
+function _renderRemiseZone(z, zi) {
+  const enabledCount = z.ops_enabled.filter(Boolean).length;
+  return `
+    <div style="border:1px solid #e2ddd2;border-radius:8px;overflow:hidden;background:#fff">
+      <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:#f6f2ea;font:700 13px Arial;color:#3a352c;cursor:pointer"
+           onclick="toggleRemiseZoneExpand(${zi})">
+        <span style="flex:1">${escapeHtml(z.label)}</span>
+        <span style="font-weight:400;color:#8c877c;font-size:11px">${enabledCount}/${z.operations.length} prestations</span>
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="transform:rotate(${z.expanded ? 180 : 0}deg)"><polyline points="6 9 12 15 18 9"/></svg>
+      </div>
+      ${z.expanded ? `
+      <div style="padding:10px 12px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          ${z.operations.map((op, oi) => `
+            <label style="display:flex;align-items:center;gap:8px;font:12px Arial;color:${z.ops_enabled[oi] ? "#3a352c" : "#b0a89a"};cursor:pointer">
+              <input type="checkbox" ${z.ops_enabled[oi] ? "checked" : ""} onchange="toggleRemiseZoneOp(${zi}, ${oi})">
+              <span style="flex:1">${escapeHtml(op)}</span>
+            </label>`).join("")}
+        </div>
+        ${(z.prestations_libres || []).length ? `
+          <div style="display:flex;flex-direction:column;gap:3px;border-top:1px dashed #e2ddd2;padding-top:6px">
+            ${z.prestations_libres.map((pl, k) => `
+              <div style="display:flex;align-items:center;gap:8px;font:12px Arial;color:#3a352c">
+                <span style="flex:1">•&nbsp;${escapeHtml(pl)}</span>
+                <button class="btn btn--ghost btn--sm" title="Supprimer" onclick="removeRemiseZoneLibre(${zi}, ${k})">✕</button>
+              </div>`).join("")}
+          </div>` : ""}
+        <div style="display:flex;gap:8px">
+          <input type="text" id="remise-libre-${zi}" placeholder="Ajouter une prestation libre dans « ${escapeHtml(z.label)} »"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();addRemiseZoneLibre(${zi});}"
+            style="flex:1;min-width:0;font:12px Arial;padding:6px;border:1px solid #d8d3c8;border-radius:6px">
+          <button class="btn btn--ghost btn--sm" onclick="addRemiseZoneLibre(${zi})">Ajouter</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          ${z.photo ? `
+            <img src="${z.photo}" alt="" style="height:46px;border-radius:6px;border:1px solid #e2ddd2">
+            <span style="font:11px Arial;color:#8c877c;flex:1">${escapeHtml(z.photo_name || "photo")}</span>
+            <button class="btn btn--ghost btn--sm" onclick="removeRemiseZonePhoto(${zi})">Retirer la photo</button>
+          ` : `
+            <label class="btn btn--ghost btn--sm" style="cursor:pointer">Ajouter une photo
+              <input type="file" accept="image/*,.heic,.heif" style="display:none" onchange="onRemiseZonePhoto(${zi}, this)"></label>
+            <span style="font:11px Arial;color:#8c877c">(optionnelle, affichée dans cette zone)</span>
+          `}
+        </div>
+      </div>` : ""}
+    </div>`;
 }
 
 function renderRemiseEtat() {
@@ -7189,53 +7278,31 @@ function renderRemiseEtat() {
     <div class="zone-block" style="margin-top:16px;border:2px solid ${r.actif ? "#b3741f" : "#e2ddd2"};border-radius:12px;overflow:hidden">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px 14px;background:${r.actif ? "#fbf3e6" : "#faf9f6"};font:600 14px Arial;color:#3a352c">
         <input type="checkbox" ${r.actif ? "checked" : ""} onchange="toggleRemiseEtat(this.checked)">
-        Ajouter un Poste 2 – Remise en état ponctuelle
-        <span style="font-weight:400;color:#8c877c;font-size:12px">(intervention ponctuelle, distincte du forfait mensuel)</span>
+        Poste 2 – Remise en état ponctuelle
+        <span style="font-weight:400;color:#8c877c;font-size:12px">(zones structurées, distinct du forfait mensuel)</span>
       </label>
       ${r.actif ? `
       <div style="padding:14px;display:flex;flex-direction:column;gap:12px">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <label style="font:11px Arial;color:#8c877c">Titre du poste
-            <input value="${escapeHtml(r.titre || "")}" oninput="setRemiseField('titre', this.value)"
-              style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-          <label style="font:11px Arial;color:#8c877c">Prix HT ponctuel (€) <span style="color:#b3741f">— laissez vide = descriptif, sans coût</span>
-            <input type="number" min="0" step="0.01" value="${prixHt != null ? prixHt : ""}" placeholder="ex : 950"
+        <label style="font:11px Arial;color:#8c877c">Introduction (texte affiché avant les zones)
+          <textarea oninput="setRemiseField('intro', this.value)" rows="2"
+            style="width:100%;font:12px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px;resize:vertical">${escapeHtml(r.intro || "")}</textarea></label>
+
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${r.zones.map((z, zi) => _renderRemiseZone(z, zi)).join("")}
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end;border-top:1px solid #eee;padding-top:10px">
+          <label style="font:11px Arial;color:#8c877c">Prix HT ponctuel (€) <span style="color:#b3741f">— vide = descriptif</span>
+            <input type="number" min="0" step="0.01" value="${prixHt != null ? prixHt : ""}" placeholder="ex : 1450"
               oninput="setRemiseField('prix_ht', this.value)"
               style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-        </div>
-        <label style="font:11px Arial;color:#8c877c">Description (optionnelle)
-          <input value="${escapeHtml(r.description || "")}" oninput="setRemiseField('description', this.value)"
-            placeholder="ex : Remise en état des parties communes avant mise en place de l'entretien régulier"
-            style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-
-        <div style="border:1px dashed #d8d3c8;border-radius:8px;padding:10px 12px;background:#fafaf8">
-          <div style="font:600 12px Arial;color:#3a352c;margin-bottom:6px">Prestations de remise en état</div>
-          ${(r.prestations || []).length ? `
-            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
-              ${(r.prestations || []).map((pl, k) => `
-                <div style="display:flex;align-items:center;gap:8px;font:12px Arial;color:#3a352c">
-                  <span style="flex:1">•&nbsp;${escapeHtml(pl)}</span>
-                  <button class="btn btn--ghost btn--sm" title="Supprimer" onclick="removeRemisePrestation(${k})">✕</button>
-                </div>`).join("")}
-            </div>` : ""}
-          <div style="display:flex;gap:8px">
-            <input type="text" id="remise-input" placeholder="ex : Décrassage des sols, Lessivage des portes…"
-              onkeydown="if(event.key==='Enter'){event.preventDefault();addRemisePrestation();}"
-              style="flex:1;min-width:0;font:12px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px">
-            <button class="btn btn--ghost btn--sm" onclick="addRemisePrestation()">Ajouter</button>
-          </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;align-items:end">
           <label style="font:11px Arial;color:#8c877c">TVA (%)
             <input type="number" min="0" step="0.1" value="${r.tva}" oninput="setRemiseField('tva', this.value)"
               style="width:100%;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px"></label>
-          <div style="font:11px Arial;color:#8c877c">Total ponctuel HT
-            <div style="font:700 14px Arial;color:#3a352c;padding:7px 0">${prixHt != null ? fmt(prixHt) : "—"}</div></div>
           <div style="font:11px Arial;color:#8c877c">Total ponctuel TTC
             <div style="font:700 14px Arial;color:#b3741f;padding:7px 0">${ttc != null ? fmt(ttc) : "—"}</div></div>
         </div>
-        <div style="font:11px Arial;color:#8c877c">Ce poste n'est facturé que si un prix HT est renseigné. Il n'entre jamais dans le total mensuel du Poste 1.</div>
+        <div style="font:11px Arial;color:#8c877c">Ce poste n'est facturé que si un prix HT est renseigné. Cocher/ajouter des prestations ne modifie jamais le total mensuel du Poste 1.</div>
       </div>` : ""}
     </div>`;
 }
@@ -7264,22 +7331,62 @@ function setRemiseField(key, value) {
   if (typeof saveDraft === "function") saveDraft();
 }
 
-function addRemisePrestation() {
-  const input = document.getElementById("remise-input");
+function toggleRemiseZoneExpand(zi) {
+  const r = _ensureRemiseEtat();
+  if (r.zones[zi]) r.zones[zi].expanded = !r.zones[zi].expanded;
+  renderRemiseEtat();
+}
+
+function toggleRemiseZoneOp(zi, oi) {
+  const r = _ensureRemiseEtat();
+  const z = r.zones[zi];
+  if (!z) return;
+  z.ops_enabled[oi] = !z.ops_enabled[oi];
+  renderRemiseEtat();
+  if (typeof updatePreview === "function") updatePreview();
+  if (typeof saveDraft === "function") saveDraft();
+}
+
+function addRemiseZoneLibre(zi) {
+  const input = document.getElementById(`remise-libre-${zi}`);
   if (!input) return;
   const val = (input.value || "").trim();
   if (!val) return;
   const r = _ensureRemiseEtat();
-  r.prestations.push(val);
+  r.zones[zi].prestations_libres.push(val);
   input.value = "";
   renderRemiseEtat();
   if (typeof updatePreview === "function") updatePreview();
   if (typeof saveDraft === "function") saveDraft();
 }
 
-function removeRemisePrestation(k) {
+function removeRemiseZoneLibre(zi, k) {
   const r = _ensureRemiseEtat();
-  r.prestations.splice(k, 1);
+  r.zones[zi].prestations_libres.splice(k, 1);
+  renderRemiseEtat();
+  if (typeof updatePreview === "function") updatePreview();
+  if (typeof saveDraft === "function") saveDraft();
+}
+
+function onRemiseZonePhoto(zi, input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  (typeof readPhotoForBackend === "function" ? readPhotoForBackend(file) : Promise.reject())
+    .then(photo => {
+      const r = _ensureRemiseEtat();
+      r.zones[zi].photo = (photo && (photo.photo_data || photo.dataUrl)) || photo;
+      r.zones[zi].photo_name = file.name;
+      renderRemiseEtat();
+      if (typeof updatePreview === "function") updatePreview();
+      if (typeof saveDraft === "function") saveDraft();
+    })
+    .catch(() => showToast("Photo non lisible", "danger"));
+}
+
+function removeRemiseZonePhoto(zi) {
+  const r = _ensureRemiseEtat();
+  r.zones[zi].photo = null;
+  r.zones[zi].photo_name = null;
   renderRemiseEtat();
   if (typeof updatePreview === "function") updatePreview();
   if (typeof saveDraft === "function") saveDraft();
@@ -12459,15 +12566,26 @@ function onGabaritChange() {
       })(),
       zones_selectionnees: zonesSelectionnees,
       zones_detail: zonesDetail,
-      // Poste 2 — Remise en état ponctuelle (distinct du forfait mensuel).
+      // Poste 2 — Remise en état ponctuelle STRUCTURÉE PAR ZONES (distinct du
+      // forfait mensuel). On n'envoie que les opérations COCHÉES + les libres.
       remise_etat: (function () {
         const r = state.devis.remise_etat;
         if (!r || !r.actif) return { actif: false };
+        const zones = Array.isArray(r.zones) ? r.zones.map(z => ({
+          code: z.code,
+          label: v(z.label || z.code || ""),
+          operations: Array.isArray(z.operations)
+            ? z.operations.filter((op, i) => z.ops_enabled && z.ops_enabled[i] !== false).map(x => v(x)).filter(x => x && x.trim())
+            : [],
+          prestations_libres: Array.isArray(z.prestations_libres) ? z.prestations_libres.map(x => v(x)).filter(x => x && x.trim()) : [],
+          photo: z.photo || null,
+        })) : [];
         return {
           actif: true,
-          titre: v(r.titre || "Remise en état"),
+          titre: v(r.titre || "Remise en état ponctuelle"),
           description: v(r.description || ""),
-          prestations: Array.isArray(r.prestations) ? r.prestations.map(x => v(x)).filter(x => x && x.trim()) : [],
+          intro: v(r.intro || ""),
+          zones: zones,
           prix_ht: (r.prix_ht != null && r.prix_ht !== "") ? r.prix_ht : null,
           tva: (r.tva != null && r.tva !== "") ? r.tva : 20,
         };

@@ -865,6 +865,37 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
         data["REMISE_ACTIF"] = True
         data["REMISE_TITRE"] = str(re_data.get("titre") or "Remise en état").strip()
         data["REMISE_DESCRIPTION"] = str(re_data.get("description") or "").strip()
+        data["REMISE_INTRO"] = str(re_data.get("intro") or "").strip()
+        # Zones structurées (Hall, Paliers, Escaliers…), comme le Poste 1 : chaque
+        # zone porte ses opérations COCHÉES + ses prestations libres + ses photos.
+        # Purement descriptif : rien de tout ceci n'influe sur le prix.
+        from config import STORAGE_DIR as _SD
+        _remise_updir = _SD / "photos" / "_uploads"
+        _remise_updir.mkdir(parents=True, exist_ok=True)
+        zones_out = []
+        for z in (re_data.get("zones") or []):
+            if not isinstance(z, dict):
+                continue
+            label = str(z.get("label") or z.get("code") or "").strip()
+            if not label:
+                continue
+            ops = [str(x).strip() for x in (z.get("operations") or []) if str(x).strip()]
+            libres = [str(x).strip() for x in (z.get("prestations_libres") or []) if str(x).strip()]
+            all_ops = ops + libres
+            photo_paths = []
+            raw_photos = z.get("photos")
+            if not isinstance(raw_photos, list):
+                raw_photos = [z.get("photo")] if z.get("photo") else []
+            for item in raw_photos:
+                url = item.get("photo_data") if isinstance(item, dict) else item
+                if isinstance(url, str) and url.strip():
+                    fp = _normaliser_image_upload(url, _remise_updir)
+                    if fp:
+                        photo_paths.append(fp)
+            if all_ops or photo_paths:
+                zones_out.append({"label": label, "operations": all_ops, "photos": photo_paths})
+        data["REMISE_ZONES"] = zones_out
+        # Rétrocompat : l'ancienne clé plate n'est plus alimentée.
         data["REMISE_PRESTATIONS"] = [
             str(x).strip() for x in (re_data.get("prestations") or []) if str(x).strip()
         ]

@@ -2884,6 +2884,8 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
             return el
 
         titre_p2 = (data.get("REMISE_TITRE") or "Remise en état").strip()
+        # Évite le doublon « ponctuelle ponctuelle » si le titre le contient déjà.
+        titre_p2_h = titre_p2 if "ponctuel" in titre_p2.lower() else f"{titre_p2} ponctuelle"
 
         # 1) Titre « Poste 1 » avant la 1re zone
         for p in doc.paragraphs:
@@ -2898,21 +2900,55 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 fixed3 = p
                 break
         if fixed3 is not None:
-            intro = ("Dans le cadre de la mise en place de l'entretien régulier, une remise "
-                     "en état ponctuelle des parties communes pourra être réalisée selon les "
-                     "prestations suivantes :")
+            from docx.shared import Cm as _Cm
+            import os as _os
+            intro = (data.get("REMISE_INTRO") or
+                     "Avant de démarrer la prestation de décapage / dégraissage, les supports "
+                     "et/ou revêtements seront dépoussiérés et balayés. Les points de contacts "
+                     "seront également nettoyés et désinfectés.")
             closing = ("Cette intervention fera l'objet d'une facturation ponctuelle, distincte "
                        "du forfait mensuel d'entretien récurrent.")
-            blocks = [clone(heading_ref, f"Poste 2 – {titre_p2} ponctuelle")]
+
+            def emit(text, ref):
+                fixed3._element.addprevious(clone(ref, text))
+
+            def emit_bullet(text):
+                if bullet_ref is not None:
+                    emit(text, bullet_ref)
+                else:
+                    emit(f"-   {text}", body_ref)
+
+            def emit_photo(path):
+                try:
+                    pp = fixed3.insert_paragraph_before("")
+                    pp.add_run().add_picture(str(path), width=_Cm(5))
+                except Exception:
+                    pass
+
+            emit(f"Poste 2 – {titre_p2_h}", heading_ref)
             desc = (data.get("REMISE_DESCRIPTION") or "").strip()
             if desc:
-                blocks.append(clone(body_ref, desc))
-            blocks.append(clone(body_ref, intro))
-            for op in (data.get("REMISE_PRESTATIONS") or []):
-                blocks.append(clone(bullet_ref, op) if bullet_ref is not None else clone(body_ref, f"-   {op}"))
-            blocks.append(clone(body_ref, closing))
-            for el in blocks:
-                fixed3._element.addprevious(el)
+                emit(desc, body_ref)
+            emit(intro, body_ref)
+
+            zones = data.get("REMISE_ZONES")
+            if isinstance(zones, list) and zones:
+                # Structure par zone (Hall, Paliers, Escaliers…), comme le Poste 1.
+                for z in zones:
+                    lbl = str(z.get("label") or "").strip()
+                    if lbl:
+                        emit(lbl, heading_ref)  # titre de zone (gras)
+                    for op in (z.get("operations") or []):
+                        emit_bullet(op)
+                    for ph in (z.get("photos") or []):
+                        if ph and _os.path.exists(str(ph)):
+                            emit_photo(ph)
+            else:
+                # Rétrocompat : ancienne liste plate.
+                for op in (data.get("REMISE_PRESTATIONS") or []):
+                    emit_bullet(op)
+
+            emit(closing, body_ref)
 
         # 3) Bloc financier « Poste 2 » après le tableau financier (uniquement si prix)
         if data.get("REMISE_A_PRIX"):
@@ -2924,7 +2960,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     break
             if fin_table is not None:
                 fin_blocks = [
-                    clone(heading_ref, f"Poste 2 – {titre_p2} ponctuelle"),
+                    clone(heading_ref, f"Poste 2 – {titre_p2_h}"),
                     clone(body_ref, "Remise en état des parties communes"),
                     clone(body_ref,
                           f"Total ponctuel HT : {data.get('REMISE_HT', '')}     "
