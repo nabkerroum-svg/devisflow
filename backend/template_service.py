@@ -2721,12 +2721,84 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
             return
 
     def lock_fixed_section_starts():
-        """Force les sections officielles à commencer sur une nouvelle page."""
-        fixed_titles = ("prestations complementaires",)
-        for p in doc.paragraphs:
-            txt = norm(p.text)
-            if any(marker in txt for marker in fixed_titles):
-                p.paragraph_format.page_break_before = True
+        """Verrouille le départ des PAGES FIXES (contenu 100 % modèle) :
+        « 3 - Prestations complémentaires » et « 4 - Traçabilité / pointage ».
+
+        Ces pages doivent toujours démarrer en HAUT d'une nouvelle page, à une
+        position IDENTIQUE quel que soit le contenu dynamique (Poste 1/2, photos,
+        équipements) qui précède. Deux causes d'instabilité sont traitées :
+
+          1) des paragraphes vides « variables » juste avant le titre décalaient
+             la page vers le bas → on les retire (on préserve un éventuel
+             paragraphe de saut de page dur du modèle, qui n'est PAS vide) ;
+          2) le départ de « Prestations complémentaires » ne reposait sur AUCUN
+             saut de page fiable (le modèle n'en contient pas, et page_break_before
+             est supprimé par la normalisation LibreOffice) → on garantit un vrai
+             saut de page dur, dans un paragraphe dédié, juste avant le titre.
+
+        Le CONTENU interne de ces pages (titre, logos, images, textes) n'est jamais
+        modifié : on n'agit qu'AVANT le titre.
+        """
+        from docx.oxml import OxmlElement as _OxE
+        from docx.oxml.ns import qn as _qn
+        from docx.shared import Pt
+
+        fixed_markers = ("prestations complementaires", "tracabilite des prestations")
+
+        def _p_vide(el):
+            if el.tag != _qn("w:p"):
+                return False
+            if el.findall(".//" + _qn("w:drawing")) or el.findall(".//" + _qn("w:pict")):
+                return False
+            if el.findall(".//" + _qn("w:br")):
+                return False  # un saut de page/ligne = pas « vide » (on le préserve)
+            return not "".join(t.text or "" for t in el.findall(".//" + _qn("w:t"))).strip()
+
+        def _porte_saut(el):
+            if el is None or el.tag != _qn("w:p"):
+                return False
+            return any(br.get(_qn("w:type")) == "page"
+                       for br in el.findall(".//" + _qn("w:br")))
+
+        for p in list(doc.paragraphs):
+            if not any(m in norm(p.text) for m in fixed_markers):
+                continue
+            el = p._element
+            # (1) retirer les paragraphes vides variables juste avant le titre
+            prev = el.getprevious()
+            while prev is not None and _p_vide(prev):
+                rem = prev
+                prev = prev.getprevious()
+                rem.getparent().remove(rem)
+            # (2) garantir un saut de page dur juste avant le titre. On pose le
+            #     saut EN FIN du paragraphe précédent (saut « traînant »), et NON
+            #     dans un paragraphe dédié : la normalisation LibreOffice DUPLIQUE
+            #     un saut porté par un paragraphe vide dédié (elle en rajoute un sur
+            #     le paragraphe précédent → double saut = page blanche). Un saut en
+            #     fin de paragraphe de texte, lui, reste unique. On ne double pas
+            #     non plus si le précédent porte déjà un saut (cas du modèle pour
+            #     la traçabilité). On n'utilise PAS page_break_before (supprimé par
+            #     LibreOffice, et source de doublons).
+            def _ajouter_saut_fin(par_el):
+                run = _OxE("w:r")
+                br = _OxE("w:br")
+                br.set(_qn("w:type"), "page")
+                run.append(br)
+                par_el.append(run)
+
+            prev = el.getprevious()
+            if prev is None:
+                pass  # rien avant : le titre est déjà en tête de document
+            elif _porte_saut(prev):
+                pass  # saut déjà présent (modèle) : ne pas doubler
+            elif prev.tag == _qn("w:p"):
+                _ajouter_saut_fin(prev)
+            else:
+                # Précédé d'un tableau (cas rare) : paragraphe de saut dédié.
+                brk = p.insert_paragraph_before("")
+                brk.paragraph_format.space_before = Pt(0)
+                brk.paragraph_format.space_after = Pt(0)
+                _ajouter_saut_fin(brk._p)
 
     def iter_paragraphs():
         for p in doc.paragraphs:
@@ -4564,6 +4636,28 @@ def _supprimer_pages_vides(docx_path: Path) -> Path:
     if start is None:
         return docx_path
 
+    # ZONE DES PAGES FIXES À NE JAMAIS NETTOYER : de « 3 - Prestations
+    # complémentaires » jusqu'à « 5 - Proposition financière » (ce qui couvre les
+    # deux pages fixes « Prestations complémentaires » et « Traçabilité / pointage »
+    # et leurs vides internes de mise en page). On distingue ainsi une VRAIE page
+    # vide (accumulation de vides dans la zone dynamique du Poste 2 / avant les CGV)
+    # d'une page fixe utile (dont les vides structurent la mise en page du modèle).
+    def _idx(*needles):
+        for k, c in enumerate(children):
+            if c.tag != qn("w:p"):
+                continue
+            t = _norm("".join(x.text or "" for x in c.findall(".//" + qn("w:t"))))
+            if any(nd in t for nd in needles):
+                return k
+        return None
+
+    idx_fixe_debut = _idx("prestations complementaires")
+    idx_fixe_fin = _idx("proposition financiere")
+    protege = set()
+    if idx_fixe_debut is not None:
+        fin = idx_fixe_fin if (idx_fixe_fin is not None and idx_fixe_fin > idx_fixe_debut) else n
+        protege = set(range(idx_fixe_debut, fin))
+
     a_suppr = []
     i = start
     while i < n:
@@ -4572,15 +4666,28 @@ def _supprimer_pages_vides(docx_path: Path) -> Path:
             j = i
             while j < n and children[j].tag == qn("w:p") and est_vide(children[j]):
                 j += 1
-            run = children[i:j]
             suivant = children[j] if j < n else None
             devant_saut = (
                 suivant is not None
                 and suivant.tag == qn("w:p")
                 and est_saut(suivant)
             )
-            garder = 0 if devant_saut else 1
-            a_suppr.extend(run[garder:])
+            precedent = children[i - 1] if i > 0 else None
+            derriere_saut = (
+                precedent is not None
+                and precedent.tag == qn("w:p")
+                and est_saut(precedent)
+            )
+            # On retire TOUS les vides quand ils sont soit juste avant un saut de
+            # page, soit juste APRÈS un paragraphe qui en porte un (lignes blanches
+            # en tête de nouvelle page). Ce dernier cas est essentiel avant les
+            # pages fixes : sans lui, un vide résiduel subsiste entre le saut et le
+            # titre, et LibreOffice lui rattache un second saut → page blanche.
+            garder = 0 if (devant_saut or derriere_saut) else 1
+            # On ne supprime jamais un vide situé dans la zone des pages fixes.
+            for k in range(i + garder, j):
+                if k not in protege:
+                    a_suppr.append(children[k])
             i = j
         else:
             i += 1
