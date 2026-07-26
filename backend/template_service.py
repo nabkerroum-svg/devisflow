@@ -2960,6 +2960,72 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 except Exception:
                     pass
 
+            from docx.enum.text import WD_ALIGN_PARAGRAPH as _WDA
+
+            def _table_sans_bordures(tbl):
+                tblPr = tbl._tbl.tblPr
+                bd = _OxE("w:tblBorders")
+                for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+                    e = _OxE("w:" + edge)
+                    e.set(_qn("w:val"), "none")
+                    e.set(_qn("w:sz"), "0")
+                    e.set(_qn("w:space"), "0")
+                    bd.append(e)
+                tblPr.append(bd)
+
+            def _cant_split(row):
+                trPr = row._tr.get_or_add_trPr()
+                if trPr.find(_qn("w:cantSplit")) is None:
+                    trPr.append(_OxE("w:cantSplit"))
+
+            def emit_zone_table(lbl, ops, photo_paths):
+                """Zone du Poste 2 avec photos : mise en page « texte à gauche /
+                photos à droite », comme les zones du Poste 1. Table 2 colonnes
+                SANS bordure. La ligne est indivisible (cantSplit) : si la zone ne
+                tient pas, elle bascule proprement sur la page suivante sans être
+                coupée. Sans photo, on n'utilise PAS de table (voir plus bas) pour
+                éviter une colonne droite vide."""
+                tbl = doc.add_table(rows=1, cols=2)
+                tbl.autofit = False
+                _table_sans_bordures(tbl)
+                row = tbl.rows[0]
+                _cant_split(row)
+                left, right = row.cells[0], row.cells[1]
+                left.width = _Cm(11.6)
+                right.width = _Cm(4.6)
+                # Colonne gauche : titre de zone (gras, propre) + puces.
+                tp = left.paragraphs[0]
+                tp.paragraph_format.space_before = _Pt(10)
+                tp.paragraph_format.space_after = _Pt(4)
+                tp.paragraph_format.keep_with_next = True
+                rr = tp.add_run(lbl)
+                rr.font.name = "Arial"
+                rr.font.size = _Pt(11)
+                rr.bold = True
+                for op in ops:
+                    if bullet_ref is not None:
+                        el = clone(bullet_ref, op)
+                        _set_spacing(el, after=2)
+                        left._tc.append(el)
+                    else:
+                        bp = left.add_paragraph("-   " + op)
+                        bp.paragraph_format.space_after = _Pt(2)
+                # Colonne droite : photos empilées, taille modérée (ne pousse pas
+                # le texte), non coupées de la zone (même ligne de table).
+                rp = right.paragraphs[0]
+                rp.alignment = _WDA.CENTER
+                w = _Cm(4.3) if len(photo_paths) == 1 else _Cm(3.9)
+                for k, pth in enumerate(photo_paths):
+                    try:
+                        if k > 0:
+                            rp.add_run().add_break()
+                        rp.add_run().add_picture(str(pth), width=w)
+                    except Exception:
+                        pass
+                # Placer la table à l'emplacement voulu (avant la page fixe 3).
+                fixed3._element.addprevious(tbl._tbl)
+                return tbl
+
             def title_para(text, before=0, after=4, size=11, keep_next=False,
                            page_break_before=False):
                 """Titre GRAS propre (Arial), SANS soulignement ni tabulation — on
@@ -3004,11 +3070,14 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
             # bas d'une page avec le contenu sur la suivante.
             # Espacements : titre → intro → chaque zone (respiration avant le titre)
             # → puces (petit espace après chacune), comme dans le devis type.
-            title_para(f"Poste 2 – {titre_p2_h}", before=0, after=8, size=12,
+            # before=36 pt : le titre démarre nettement SOUS le logo d'en-tête,
+            # comme les autres pages du devis (pas de titre collé au logo en haut
+            # de la nouvelle page).
+            title_para(f"Poste 2 – {titre_p2_h}", before=36, after=8, size=12,
                        keep_next=True, page_break_before=True)
-            desc = (data.get("REMISE_DESCRIPTION") or "").strip()
-            if desc:
-                emit(desc, body_ref, after=6, keep_next=True)
+            # NB : on n'émet PLUS le champ « description » du bloc remise ici. Il
+            # provoquait l'affichage d'un libellé parasite (ex. « hall d'entrée »)
+            # juste sous le titre. L'introduction + les zones structurées suffisent.
             emit(intro, body_ref, after=10, keep_next=True)
 
             zones = data.get("REMISE_ZONES")
@@ -3016,13 +3085,20 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 # Structure par zone (Hall, Paliers, Escaliers…), comme le Poste 1.
                 for z in zones:
                     lbl = str(z.get("label") or "").strip()
-                    if lbl:
-                        title_para(lbl, before=12, after=4, size=11, keep_next=True)
-                    for op in (z.get("operations") or []):
-                        emit_bullet(op)
-                    for ph in (z.get("photos") or []):
-                        if ph and _os.path.exists(str(ph)):
-                            emit_photo(ph)
+                    ops = [op for op in (z.get("operations") or []) if str(op).strip()]
+                    zphotos = [str(ph) for ph in (z.get("photos") or [])
+                               if ph and _os.path.exists(str(ph))]
+                    if zphotos:
+                        # Zone AVEC photo(s) : texte à gauche / photos à droite,
+                        # rattachées à la zone (même logique que le Poste 1).
+                        emit_zone_table(lbl or "Zone", ops, zphotos)
+                    else:
+                        # Zone SANS photo : simple colonne texte (pas de table,
+                        # donc pas de vide bizarre à droite).
+                        if lbl:
+                            title_para(lbl, before=12, after=4, size=11, keep_next=True)
+                        for op in ops:
+                            emit_bullet(op)
             else:
                 # Rétrocompat : ancienne liste plate.
                 for op in (data.get("REMISE_PRESTATIONS") or []):
@@ -3095,6 +3171,12 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
             "Suivi assuré par l'Inspecteur et le chef d'équipe pour la mise en place du chantier",
             "Techniciens qualifiés",
         ]
+        # Le bloc « Moyens » reste groupé (chaîne keepNext/keepLines sur tous ses
+        # paragraphes) : Word/LibreOffice le garde d'un seul tenant et, s'il ne
+        # tient pas, le bascule proprement sur la page suivante sans le couper. On
+        # ne force PAS de saut de page (inutile de gâcher une page quand il tient à
+        # la suite des zones). Sa position en haut de page suit le gabarit, comme
+        # les pages fixes « 3 - Prestations complémentaires » / « 4 - Traçabilité ».
         para("3 – Moyens humains et matériels", bold=True, size=12, before=16, after=6)
         for m in MOYENS:
             para(m, bullet=True, size=10, after=2)
@@ -3151,6 +3233,8 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
     _injecter_photos(output_path, photos)
     _supprimer_rouge_document(output_path)
     _supprimer_surlignages_jaunes_document(output_path)
+    # Titres : rétrécir les soulignements qui débordaient (tabulation soulignée).
+    _hugger_soulignements_titres(output_path)
     return output_path
 
 
@@ -4506,6 +4590,58 @@ def _supprimer_pages_vides(docx_path: Path) -> Path:
     if a_suppr:
         d.save(str(docx_path))
         _nettoyer_doublons_zip(docx_path)
+    return docx_path
+
+
+def _hugger_soulignements_titres(docx_path: Path) -> Path:
+    """Corrige les titres dont le SOULIGNEMENT « déborde » du texte sous la forme
+    d'une longue ligne horizontale.
+
+    Cause : une TABULATION soulignée (ou des espaces soulignés en fin de ligne)
+    héritée des titres du modèle. Le soulignement, appliqué aussi à la tabulation,
+    s'étend alors sur toute la largeur au lieu de rester sous les lettres.
+
+    Correction prudente : on n'agit QUE sur des paragraphes déjà soulignés ET qui
+    contiennent une tabulation ou des espaces soulignés en fin. On retire la
+    tabulation et on rogne les espaces de fin ; le soulignement reste sous le
+    texte, le gras est conservé, aucune autre mise en forme n'est touchée. Les
+    puces et le texte courant (non soulignés) ne sont jamais modifiés."""
+    from docx import Document as _Doc
+    from docx.oxml.ns import qn
+    d = _Doc(str(docx_path))
+    changed = False
+
+    def a_souligne(p):
+        for r in p._p.findall(qn("w:r")):
+            rpr = r.find(qn("w:rPr"))
+            if rpr is not None and rpr.find(qn("w:u")) is not None:
+                return True
+        return False
+
+    for p in d.paragraphs:
+        if not a_souligne(p):
+            continue
+        runs = p._p.findall(qn("w:r"))
+        a_tab = any(r.findall(qn("w:tab")) for r in runs)
+        ts = p._p.findall(".//" + qn("w:t"))
+        a_trailing = bool(ts) and ts[-1].text is not None and ts[-1].text != ts[-1].text.rstrip()
+        if not (a_tab or a_trailing):
+            continue
+        for r in runs:
+            for tab in r.findall(qn("w:tab")):
+                r.remove(tab)
+                changed = True
+        if a_trailing:
+            ts[-1].text = ts[-1].text.rstrip()
+            changed = True
+        for r in list(p._p.findall(qn("w:r"))):
+            if not (r.findall(qn("w:t")) or r.findall(qn("w:tab"))
+                    or r.findall(qn("w:drawing")) or r.findall(qn("w:br"))
+                    or r.findall(qn("w:pict"))):
+                p._p.remove(r)
+                changed = True
+    if changed:
+        d.save(str(docx_path))
     return docx_path
 
 
