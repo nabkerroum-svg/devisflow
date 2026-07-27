@@ -4572,40 +4572,36 @@ def _compacter_paragraphes_vides(docx_path: Path, max_consecutifs: int = 0):
         d.save(str(docx_path))
 
 
-# Nombre de LIGNES vides insérées avant le titre de chaque section à saut de page,
-# pour que le contenu démarre SOUS le logo d'en-tête (dont le bas descend à
-# ~4,4 cm / ~125 pt alors que la marge haute vaut 2,5 cm). On utilise de vrais
-# paragraphes vides de hauteur normale (≈14 pt) : leur hauteur est fiable et NON
-# plafonnée par LibreOffice (contrairement à une grande hauteur « exact »). La
-# 1re ligne après un saut de page étant partiellement absorbée, on en prévoit une
-# de plus. Mesuré pour placer chaque titre nettement sous le logo :
-#   - Poste 2 : 6 lignes (titre ~145 pt) — 4 lignes réellement visibles plus bas
-#   - Prestations complémentaires : 5 lignes (titre ~128 pt) — ~3 lignes plus bas
-#   - Traçabilité / pointage : 5 lignes (même souci de position trop haute)
-_MARGE_HAUT_SECTIONS = {
-    "poste2": 6,
-    "prestations": 5,
-    "tracabilite": 5,
+# Marge haute (en POINTS) appliquée en space_before au titre de chaque section à
+# saut de page, pour qu'il démarre juste SOUS le logo d'en-tête — avec ~1 ligne de
+# sécurité, PAS 3-4 lignes. On utilise un space_before PRÉCIS (et non des
+# paragraphes vides) : il est honoré car chaque section est ouverte par un saut de
+# page « traînant » (en fin du paragraphe précédent), ce qui n'absorbe pas
+# l'espacement contrairement au haut d'une page atteinte par simple débordement.
+# ~30 pt placent le titre à ~1 ligne sous le bas visible du logo, proprement.
+_MARGE_HAUT_SECTIONS_PT = {
+    "poste2": 30,
+    "prestations": 30,
+    "tracabilite": 30,
 }
 
 
 def _marge_haute_sous_logo(docx_path: Path) -> Path:
-    """Ajoute un décalage vertical CIBLÉ avant les titres de section à saut de page
-    (« Poste 2 – Remise en état ponctuelle » et pages fixes « 3 - Prestations
-    complémentaires » / « 4 - Traçabilité »), afin qu'ils démarrent SOUS le logo
-    d'en-tête et non à côté.
+    """Place le titre de chaque section à saut de page (« Poste 2 – Remise en état
+    ponctuelle » et pages fixes « 3 - Prestations complémentaires » /
+    « 4 - Traçabilité ») juste SOUS le logo d'en-tête, avec ~1 ligne de sécurité.
 
-    Cause du défaut : le logo est une image flottante ancrée sur la marge, haute
-    d'environ 3,7 cm ; son bas atteint ~4,4 cm du haut de page alors que la marge
-    haute vaut 2,5 cm. Comme le logo suit la marge, l'agrandir ne sert à rien, et
-    un simple space_before est ignoré en haut d'une nouvelle page. La solution
-    fiable (déjà utilisée par le modèle) est un PARAGRAPHE D'ANCRAGE INVISIBLE à
-    hauteur exacte, dont la hauteur EST honorée même en tête de page.
+    Cause du défaut d'origine : le logo est une image flottante ancrée sur la
+    marge, dont le bas descend sous la marge haute ; un titre démarrant en haut de
+    la zone de texte tombe donc à côté du logo. Correction : un space_before PRÉCIS
+    sur le titre (≈1 ligne), honoré parce que la page est ouverte par un saut de
+    page « traînant » (en fin du paragraphe précédent). On n'insère AUCUN
+    paragraphe vide (source d'un grand blanc et du renvoi du contenu à la page
+    suivante), et on ne cumule pas les propriétés keep_with_next.
 
-    Ne modifie AUCUN contenu métier ni les pages fixes : on n'insère qu'un ancrage
-    (espace blanc non imprimant) avant le titre, après avoir normalisé le saut de
-    page en saut « traînant » (en fin du paragraphe précédent) pour éviter tout
-    doublon / page blanche. Les CGV ne sont pas concernées ici."""
+    Ne modifie aucun contenu métier ni les pages fixes : on n'agit qu'AVANT le
+    titre (nettoyage des séparateurs, saut traînant unique, space_before). Les CGV
+    ne sont pas concernées ici."""
     from docx import Document as _Doc
     from docx.oxml import OxmlElement as _OxE
     from docx.oxml.ns import qn as _qn
@@ -4621,18 +4617,18 @@ def _marge_haute_sous_logo(docx_path: Path) -> Path:
     idx_pc = next((i for i, p in enumerate(paras)
                    if "prestations complementaires" in _norm(p.text)), None)
 
-    def _hauteur(i, p):
+    def _marge_pt(i, p):
         n = _norm(p.text)
         if "poste 2" in n and "remise" in n and idx_pc is not None and i < idx_pc:
-            return _MARGE_HAUT_SECTIONS["poste2"]
+            return _MARGE_HAUT_SECTIONS_PT["poste2"]
         if "prestations complementaires" in n:
-            return _MARGE_HAUT_SECTIONS["prestations"]
+            return _MARGE_HAUT_SECTIONS_PT["prestations"]
         if "tracabilite des prestations" in n:
-            return _MARGE_HAUT_SECTIONS["tracabilite"]
-        return None  # nombre de lignes vides à insérer
+            return _MARGE_HAUT_SECTIONS_PT["tracabilite"]
+        return None
 
-    cibles = [(p, _hauteur(i, p)) for i, p in enumerate(paras)
-              if _hauteur(i, p) is not None]
+    cibles = [(p, _marge_pt(i, p)) for i, p in enumerate(paras)
+              if _marge_pt(i, p) is not None]
 
     def _est_separateur(el):
         # Paragraphe sans texte ni image (peut porter un saut/ancrage) : supprimable.
@@ -4650,36 +4646,20 @@ def _marge_haute_sous_logo(docx_path: Path) -> Path:
         r = _OxE("w:r"); br = _OxE("w:br"); br.set(_qn("w:type"), "page")
         r.append(br); el.append(r)
 
-    def _ancrage():
-        # Ligne vide de hauteur NORMALE (~14 pt), invisible (espace blanc). Pas de
-        # lineRule=exact : une grande hauteur exacte est plafonnée par LibreOffice.
-        p = _OxE("w:p")
-        ppr = _OxE("w:pPr")
-        sp = _OxE("w:spacing")
-        sp.set(_qn("w:before"), "0"); sp.set(_qn("w:after"), "0")
-        ppr.append(sp); p.append(ppr)
-        r = _OxE("w:r"); rpr = _OxE("w:rPr")
-        sz = _OxE("w:sz"); sz.set(_qn("w:val"), "22"); rpr.append(sz)
-        col = _OxE("w:color"); col.set(_qn("w:val"), "FFFFFF"); rpr.append(col)
-        r.append(rpr)
-        t = _OxE("w:t")
-        t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-        t.text = " "; r.append(t); p.append(r)
-        return p
-
-    def _mettre_before_zero(el):
+    def _fixer_space_before(el, pt):
+        # space_before précis (en twips) + suppression d'un éventuel pageBreakBefore.
         ppr = el.find(_qn("w:pPr"))
         if ppr is None:
             ppr = _OxE("w:pPr"); el.insert(0, ppr)
         sp = ppr.find(_qn("w:spacing"))
         if sp is None:
             sp = _OxE("w:spacing"); ppr.append(sp)
-        sp.set(_qn("w:before"), "0")
+        sp.set(_qn("w:before"), str(int(pt * 20)))
         pbb = ppr.find(_qn("w:pageBreakBefore"))
         if pbb is not None:
             ppr.remove(pbb)
 
-    for p, nb_lignes in cibles:
+    for p, marge_pt in cibles:
         el = p._element
         # (1) retirer les séparateurs (vides / anciens ancrages / sauts dédiés) juste
         #     avant le titre → on remonte jusqu'au 1er contenu réel.
@@ -4688,16 +4668,12 @@ def _marge_haute_sous_logo(docx_path: Path) -> Path:
             rem = prev
             prev = prev.getprevious()
             rem.getparent().remove(rem)
-        # (2) saut de page « traînant » unique en fin du contenu précédent.
+        # (2) saut de page « traînant » unique en fin du contenu précédent (permet
+        #     au space_before du titre d'être honoré, sans page blanche).
         if prev is not None and prev.tag == _qn("w:p") and not _a_saut(prev):
             _saut_fin(prev)
-        # (3) neutraliser un éventuel space_before/pageBreakBefore du titre : seules
-        #     les lignes vides ci-dessous contrôlent la marge haute.
-        _mettre_before_zero(el)
-        # (4) insérer N lignes vides invisibles juste avant le titre : le contenu
-        #     démarre alors N lignes plus bas, sous le logo.
-        for _ in range(nb_lignes):
-            el.addprevious(_ancrage())
+        # (3) marge haute PRÉCISE via space_before (≈1 ligne sous le logo).
+        _fixer_space_before(el, marge_pt)
 
     d.save(str(docx_path))
     return docx_path
