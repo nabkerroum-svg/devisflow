@@ -3055,30 +3055,57 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 if trPr.find(_qn("w:cantSplit")) is None:
                     trPr.append(_OxE("w:cantSplit"))
 
+            def _fixer_largeurs(tbl, w_gauche, w_droite):
+                """Force une largeur de colonnes FIXE (twips) : sans ça LibreOffice
+                égalise les colonnes (gauche = droite), rétrécit le texte et fait
+                déborder les lignes."""
+                tblPr = tbl._tbl.tblPr
+                tblW = tblPr.find(_qn("w:tblW"))
+                if tblW is None:
+                    tblW = _OxE("w:tblW"); tblPr.append(tblW)
+                tblW.set(_qn("w:w"), str(w_gauche + w_droite)); tblW.set(_qn("w:type"), "dxa")
+                layout = tblPr.find(_qn("w:tblLayout"))
+                if layout is None:
+                    layout = _OxE("w:tblLayout"); tblPr.append(layout)
+                layout.set(_qn("w:type"), "fixed")
+                grid = tbl._tbl.find(_qn("w:tblGrid"))
+                if grid is not None:
+                    for gc in list(grid):
+                        grid.remove(gc)
+                    for wv in (w_gauche, w_droite):
+                        gc = _OxE("w:gridCol"); gc.set(_qn("w:w"), str(wv)); grid.append(gc)
+                for ci, wv in enumerate((w_gauche, w_droite)):
+                    tcPr = tbl.rows[0].cells[ci]._tc.get_or_add_tcPr()
+                    tcW = tcPr.find(_qn("w:tcW"))
+                    if tcW is None:
+                        tcW = _OxE("w:tcW"); tcPr.append(tcW)
+                    tcW.set(_qn("w:w"), str(wv)); tcW.set(_qn("w:type"), "dxa")
+
             def emit_zone_table(lbl, ops, photo_paths):
-                """Zone du Poste 2 avec photos : mise en page « texte à gauche /
-                photos à droite », comme les zones du Poste 1. Table 2 colonnes
-                SANS bordure. La ligne est indivisible (cantSplit) : si la zone ne
-                tient pas, elle bascule proprement sur la page suivante sans être
-                coupée. Sans photo, on n'utilise PAS de table (voir plus bas) pour
-                éviter une colonne droite vide."""
+                """Zone du Poste 2 avec photos : « prestations à gauche / photos à
+                droite ». Le TITRE de la zone est un PARAGRAPHE placé AU-DESSUS du
+                tableau (et non dans une cellule). C'est essentiel : ce paragraphe
+                sépare les tableaux de zones consécutives et EMPÊCHE LibreOffice de
+                les fusionner en un seul grand tableau — fusion qui, dès que
+                l'ensemble dépassait la place restante, faisait basculer TOUT le
+                Poste 2 sur la page suivante (titre + intro restaient seuls). Ainsi
+                chaque zone est un bloc INDÉPENDANT : elle tient sur la page s'il y a
+                la place, sinon SEULE cette zone passe à la page suivante.
+
+                Le titre est collé (keep_with_next) à son tableau pour ne pas rester
+                seul en bas de page ; le tableau lui-même n'est PAS déclaré
+                insécable au niveau du bloc (chaque zone reste autonome)."""
+                if lbl:
+                    title_para(lbl, before=12, after=2, size=11, keep_next=True)
                 tbl = doc.add_table(rows=1, cols=2)
                 tbl.autofit = False
                 _table_sans_bordures(tbl)
+                # gauche ~11,5 cm / droite ~4,5 cm (twips) — largeurs fixes.
+                _fixer_largeurs(tbl, 6520, 2560)
                 row = tbl.rows[0]
                 _cant_split(row)
                 left, right = row.cells[0], row.cells[1]
-                left.width = _Cm(11.6)
-                right.width = _Cm(4.6)
-                # Colonne gauche : titre de zone (gras, propre) + puces.
-                tp = left.paragraphs[0]
-                tp.paragraph_format.space_before = _Pt(10)
-                tp.paragraph_format.space_after = _Pt(4)
-                tp.paragraph_format.keep_with_next = True
-                rr = tp.add_run(lbl)
-                rr.font.name = "Arial"
-                rr.font.size = _Pt(11)
-                rr.bold = True
+                # Colonne gauche : puces uniquement (le titre est au-dessus).
                 for op in ops:
                     if bullet_ref is not None:
                         el = clone(bullet_ref, op)
@@ -3087,8 +3114,11 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     else:
                         bp = left.add_paragraph("-   " + op)
                         bp.paragraph_format.space_after = _Pt(2)
-                # Colonne droite : photos empilées, taille modérée (ne pousse pas
-                # le texte), non coupées de la zone (même ligne de table).
+                # Retirer le paragraphe vide par défaut en tête de cellule gauche.
+                lp0 = left.paragraphs[0]
+                if not lp0.runs and len(left.paragraphs) > 1:
+                    lp0._p.getparent().remove(lp0._p)
+                # Colonne droite : photos empilées, taille modérée.
                 rp = right.paragraphs[0]
                 rp.alignment = _WDA.CENTER
                 w = _Cm(4.3) if len(photo_paths) == 1 else _Cm(3.9)
@@ -3099,7 +3129,7 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                         rp.add_run().add_picture(str(pth), width=w)
                     except Exception:
                         pass
-                # Placer la table à l'emplacement voulu (avant la page fixe 3).
+                # Placer la table juste avant la page fixe 3 (après son titre).
                 fixed3._element.addprevious(tbl._tbl)
                 return tbl
 
