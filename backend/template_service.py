@@ -1106,7 +1106,13 @@ def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
         # (sinon les paragraphes d'ancrage seraient supprimés) et AVANT la
         # normalisation (leur hauteur exacte y survit).
         _marge_haute_sous_logo(output_path)
-        return _normaliser_images_word_compat(output_path)
+        out = _normaliser_images_word_compat(output_path)
+        # Habillage du logo d'en-tête : la normalisation LibreOffice le ré-encode
+        # en « carré » (wrapSquare), ce qui, dans Microsoft Word, fait circuler le
+        # texte À DROITE du logo (titre collé au logo). On force « haut et bas »
+        # (wrapTopAndBottom) : le texte démarre alors TOUJOURS sous le logo.
+        _forcer_logo_habillage_haut_bas(out)
+        return out
     if template_stem == "bureaux_petit":
         _generer_bureaux_petit_preserve_layout(template_path, data, output_path)
         _inserer_reference_client(output_path, data.get("REF_CLIENT"))
@@ -4576,11 +4582,81 @@ def _compacter_paragraphes_vides(docx_path: Path, max_consecutifs: int = 0):
 # logo, via un space_before précis (aucun paragraphe vide, aucun saut ajouté). Le
 # titre + l'intro + Hall restent sur la même page (les zones étant des blocs
 # indépendants qui coulent naturellement).
+# Recalage après passage du logo en wrapTopAndBottom (le texte démarre désormais
+# TOUJOURS sous le bas du logo, dans Word ET LibreOffice — position de base ~120 pt).
+# On ajoute par-dessus un space_before par section :
+#   - Poste 2 : ~62 pt → titre ~4 lignes sous le logo (demande) ;
+#   - Prestations / Traçabilité : petit espace pour un départ propre juste sous le
+#     logo (leur contenu interne est inchangé, seul le point de départ suit le logo).
 _MARGE_HAUT_SECTIONS_PT = {
-    "poste2": 86,
-    "prestations": 26,
-    "tracabilite": 26,
+    "poste2": 62,
+    "prestations": 12,
+    "tracabilite": 12,
 }
+
+
+def _forcer_logo_habillage_haut_bas(docx_path: Path) -> Path:
+    """Force l'habillage du logo d'en-tête en « haut et bas » (wrapTopAndBottom).
+
+    Cause du titre collé à DROITE du logo dans Microsoft Word : après la
+    normalisation, le logo d'en-tête (image flottante ~5×3,7 cm) est ré-encodé avec
+    un habillage « carré » (wrapSquare) ET behindDoc=1 — une combinaison
+    contradictoire. LibreOffice la traite comme « derrière le texte » (le texte
+    passe donc dessous, ce qui masquait le problème dans les PDF de test), mais
+    Word applique wrapSquare et fait circuler le texte à droite du logo. Un simple
+    space_before ne suffit alors pas : Word replace le paragraphe dans la zone
+    d'habillage à droite de l'image.
+
+    Correctif : sur chaque en-tête, on remplace l'habillage du logo par
+    wrapTopAndBottom (et behindDoc=0). Word place alors OBLIGATOIREMENT le contenu
+    SOUS le logo, jamais à côté. On ne touche ni à l'image, ni à sa position, ni au
+    filigrane ni au reste : uniquement la propriété d'habillage."""
+    import zipfile
+    import re as _re
+    import os as _os
+
+    src = str(docx_path)
+    tmp = src + ".wrapfix.tmp"
+    changed = False
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for it in zin.infolist():
+            data = zin.read(it.filename)
+            if _re.match(r"word/header\d+\.xml", it.filename):
+                x = data.decode("utf-8", "ignore")
+
+                def _fix_anchor(m):
+                    nonlocal changed
+                    a = m.group(0)
+                    ext = _re.search(r'cy="(\d+)"', a)
+                    # Cible : le LOGO uniquement (hauteur ~3–3,8 cm = ~1,1–1,4 M EMU,
+                    # 1 cm = 360000 EMU). On EXCLUT le filigrane (~9,3 cm ≈ 3,35 M
+                    # EMU) et la fine ligne (~0,7 cm ≈ 0,25 M EMU), sinon on
+                    # déplacerait tout le texte sous le filigrane central.
+                    if not (ext and 0.9e6 < int(ext.group(1)) < 1.9e6):
+                        return a
+                    a2 = _re.sub(r'behindDoc="1"', 'behindDoc="0"', a)
+                    # Remplacer l'habillage existant (carré, serré, au travers ou
+                    # aucun) par « haut et bas ».
+                    a2 = _re.sub(r"<wp:wrapSquare[^>]*/>", "<wp:wrapTopAndBottom/>", a2)
+                    a2 = _re.sub(r"<wp:wrapSquare\b.*?</wp:wrapSquare>",
+                                 "<wp:wrapTopAndBottom/>", a2, flags=_re.S)
+                    a2 = _re.sub(r"<wp:wrapTight\b.*?</wp:wrapTight>",
+                                 "<wp:wrapTopAndBottom/>", a2, flags=_re.S)
+                    a2 = _re.sub(r"<wp:wrapThrough\b.*?</wp:wrapThrough>",
+                                 "<wp:wrapTopAndBottom/>", a2, flags=_re.S)
+                    a2 = _re.sub(r"<wp:wrapNone\s*/>", "<wp:wrapTopAndBottom/>", a2)
+                    if a2 != a:
+                        changed = True
+                    return a2
+
+                x = _re.sub(r"<wp:anchor\b.*?</wp:anchor>", _fix_anchor, x, flags=_re.S)
+                data = x.encode("utf-8")
+            zout.writestr(it, data)
+    if changed:
+        _os.replace(tmp, src)
+    else:
+        _os.remove(tmp)
+    return docx_path
 
 
 def _marge_haute_sous_logo(docx_path: Path) -> Path:
