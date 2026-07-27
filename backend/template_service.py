@@ -1002,14 +1002,32 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
             if "reference client" in norm(p.text):
                 return docx_path
 
-        def make_ref_el(style_ref=None):
+        def make_ref_el(style_ref=None, frame_up=False):
             """Élément <w:p> « Référence client : … » : aligné à GAUCHE (marge),
             en GRAS, taille 16 pt, sans indentation. On ne clone pas « Proposition »
-            (qui est indenté/centré) pour placer la référence tout à gauche."""
+            (qui est indenté/centré) pour placer la référence tout à gauche.
+
+            frame_up=True : remonte le bloc d'environ 2 lignes en le sortant du flux
+            via un CADRE flottant (w:framePr) positionné ~28 pt plus haut, ancré à
+            la marge gauche. Un simple space_before négatif fait « sauter » le bloc
+            sur cette couverture à images flottantes → on utilise donc un cadre
+            (positionnement déterministe). La hauteur retirée du flux est ensuite
+            restituée par _compenser_flux() pour que « Proposition » et l'adresse
+            chantier ne bougent pas. N'est activé que sur la couverture copro
+            (stratégie 1)."""
             from docx.oxml import OxmlElement
             from docx.oxml.ns import qn as _qn
             p = OxmlElement("w:p")
             pPr = OxmlElement("w:pPr")
+            if frame_up:
+                frame = OxmlElement("w:framePr")
+                frame.set(_qn("w:w"), "5040")          # largeur du cadre ~9 cm
+                frame.set(_qn("w:hAnchor"), "margin")   # ancré à la marge…
+                frame.set(_qn("w:xAlign"), "left")      # …à gauche
+                frame.set(_qn("w:vAnchor"), "text")     # vertical relatif à la ligne
+                frame.set(_qn("w:y"), "-560")           # 28 pt plus haut (≈ 2 lignes)
+                frame.set(_qn("w:wrap"), "around")
+                pPr.append(frame)
             jc = OxmlElement("w:jc"); jc.set(_qn("w:val"), "left"); pPr.append(jc)
             ind = OxmlElement("w:ind")
             ind.set(_qn("w:left"), "0"); ind.set(_qn("w:firstLine"), "0")
@@ -1029,6 +1047,33 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
             p.append(r)
             return p
 
+        def _compenser_flux(el, twips=740):
+            """La référence étant sortie du flux (cadre flottant), le contenu qui la
+            suit (« Proposition », adresse chantier) remonterait de la hauteur du
+            bloc. On RESTITUE cette hauteur en ajoutant `twips` à l'espacement AVANT
+            du 1er paragraphe de flux qui suit → Proposition et l'adresse chantier
+            reviennent à leur position d'origine. Les images (ancrées à la page) et
+            le bloc client (au-dessus) ne bougent pas."""
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn as _qn
+            nxt = el.getnext()
+            while nxt is not None and nxt.tag != f"{W}p":
+                nxt = nxt.getnext()
+            if nxt is None:
+                return
+            ppr = nxt.find(f"{W}pPr")
+            if ppr is None:
+                ppr = OxmlElement("w:pPr"); nxt.insert(0, ppr)
+            spc = ppr.find(f"{W}spacing")
+            if spc is None:
+                spc = OxmlElement("w:spacing"); ppr.append(spc)
+            cur = spc.get(_qn("w:before"))
+            try:
+                cur = int(cur) if cur is not None else 0
+            except ValueError:
+                cur = 0
+            spc.set(_qn("w:before"), str(cur + twips))
+
         def _short_prop(n):
             return len(n) < 40 and (n.startswith("proposition ") or n.startswith("devis "))
 
@@ -1037,7 +1082,7 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
         body = doc.paragraphs
         anchor_idx = next((i for i, p in enumerate(body) if _short_prop(norm(p.text))), None)
         if anchor_idx is not None:
-            new_el = make_ref_el(body[anchor_idx])
+            new_el = make_ref_el(body[anchor_idx], frame_up=True)
             top = anchor_idx
             j = anchor_idx - 1
             while j >= 0 and not (body[j].text or "").strip():
@@ -1049,6 +1094,7 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
                 sp._element.getparent().remove(sp._element)
             else:
                 body[anchor_idx]._element.addprevious(new_el)
+            _compenser_flux(new_el)
             doc.save(str(docx_path))
             _nettoyer_doublons_zip(docx_path)
             return docx_path
