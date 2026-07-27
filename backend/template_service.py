@@ -3234,21 +3234,146 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     fin_table = tb
                     break
             if fin_table is not None:
-                fin_blocks = [
-                    clone(heading_ref, f"Poste 2 – {titre_p2_h}"),
-                    clone(body_ref, "Remise en état des parties communes"),
-                    clone(body_ref,
-                          f"Total ponctuel HT : {data.get('REMISE_HT', '')}     "
-                          f"TVA ({data.get('REMISE_TVA_TAUX', '')}) : {data.get('REMISE_TVA', '')}     "
-                          f"Total ponctuel TTC : {data.get('REMISE_TTC', '')}"),
-                    clone(body_ref,
-                          "Cette intervention fait l'objet d'une facturation ponctuelle, "
-                          "distincte du forfait mensuel d'entretien récurrent."),
-                ]
+                import copy as _copy
+                from docx.oxml import OxmlElement as _OxE2
+                from docx.oxml.ns import qn as _qn2
+
+                # Séparateur minimal entre le tableau du Poste 1 et celui du Poste 2
+                # (un paragraphe entre deux tableaux est requis par le format Word).
+                # On N'AJOUTE PAS de titre autonome « Poste 2 » : il ferait déborder
+                # la page (cf. bloc signature poussé sur une page blanche). La
+                # distinction est portée par les en-têtes de colonnes (« forfaitaire »
+                # sans « mensuel ») et par la 1re cellule « Remise en état des parties
+                # communes ».
+                sep_el = _OxE2("w:p")
+                _sep_ppr = _OxE2("w:pPr")
+                _sep_sp = _OxE2("w:spacing")
+                _sep_sp.set(_qn2("w:before"), "60"); _sep_sp.set(_qn2("w:after"), "0")
+                _sep_ppr.append(_sep_sp)
+                _sep_rpr = _OxE2("w:rPr")
+                _sep_sz = _OxE2("w:sz"); _sep_sz.set(_qn2("w:val"), "8")
+                _sep_rpr.append(_sep_sz)
+                _sep_ppr.append(_sep_rpr)
+                sep_el.append(_sep_ppr)
+
+                # VRAI TABLEAU financier Poste 2, du même style graphique que le
+                # tableau du Poste 1 : on CLONE le tableau du Poste 1 puis on le
+                # réduit à 1 en-tête + 1 seule ligne. Une SEULE ligne financière
+                # pour tout le Poste 2, au prix GLOBAL (remise_etat.prix_ht) — jamais
+                # une ligne par zone, jamais de prix multiplié par le nombre de
+                # zones. Les zones/photos/équipements du Poste 2 restent purement
+                # descriptifs et n'alimentent PAS ce tableau.
+                new_tbl = _copy.deepcopy(fin_table._tbl)
+                _rows = new_tbl.findall(_qn2("w:tr"))
+                for r in _rows[2:]:
+                    new_tbl.remove(r)
+
+                def _set_tc_text(tc, text):
+                    ts = tc.findall(".//" + _qn2("w:t"))
+                    if ts:
+                        ts[0].text = text
+                        for t in ts[1:]:
+                            t.text = ""
+                    else:
+                        p = tc.find(_qn2("w:p"))
+                        if p is None:
+                            p = _OxE2("w:p"); tc.append(p)
+                        r = _OxE2("w:r"); t = _OxE2("w:t")
+                        t.text = text; r.append(t); p.append(r)
+
+                entete = ["Prestation", "Prix forfaitaire HT", "TVA",
+                          "Prix forfaitaire TTC"]
+                ligne = ["Remise en état des parties communes",
+                         data.get("REMISE_HT", ""), data.get("REMISE_TVA", ""),
+                         data.get("REMISE_TTC", "")]
+                _rows2 = new_tbl.findall(_qn2("w:tr"))
+                if _rows2:
+                    for tc, txt in zip(_rows2[0].findall(_qn2("w:tc")), entete):
+                        _set_tc_text(tc, txt)
+                if len(_rows2) > 1:
+                    for tc, txt in zip(_rows2[1].findall(_qn2("w:tc")), ligne):
+                        _set_tc_text(tc, txt)
+
+                # Compacter le tableau pour qu'il n'occupe pas plus de hauteur que
+                # l'ancien bloc texte (sinon il décale la page et pousse le bloc
+                # signature « Bon pour accord » sur une page blanche parasite) :
+                #  - on retire toute hauteur de ligne fixe héritée du Poste 1 ;
+                #  - on met les marges HAUT/BAS des cellules à 0 (marges internes).
+                for _tr in _rows2:
+                    _trPr = _tr.find(_qn2("w:trPr"))
+                    if _trPr is not None:
+                        for _th in _trPr.findall(_qn2("w:trHeight")):
+                            _trPr.remove(_th)
+                _tblPr2 = new_tbl.find(_qn2("w:tblPr"))
+                if _tblPr2 is not None:
+                    _cm = _tblPr2.find(_qn2("w:tblCellMar"))
+                    if _cm is None:
+                        _cm = _OxE2("w:tblCellMar"); _tblPr2.append(_cm)
+                    for _edge in ("top", "bottom"):
+                        _e = _cm.find(_qn2("w:" + _edge))
+                        if _e is None:
+                            _e = _OxE2("w:" + _edge); _cm.append(_e)
+                        _e.set(_qn2("w:w"), "0"); _e.set(_qn2("w:type"), "dxa")
+                # Interligne simple exact sur les paragraphes des cellules (pas de
+                # sur-hauteur) + espacement paragraphe nul.
+                for _p in new_tbl.findall(".//" + _qn2("w:p")):
+                    _ppr = _p.find(_qn2("w:pPr"))
+                    if _ppr is None:
+                        _ppr = _OxE2("w:pPr"); _p.insert(0, _ppr)
+                    _sp = _ppr.find(_qn2("w:spacing"))
+                    if _sp is None:
+                        _sp = _OxE2("w:spacing"); _ppr.append(_sp)
+                    _sp.set(_qn2("w:before"), "0"); _sp.set(_qn2("w:after"), "0")
+
+                # Phrase de clôture (facturation ponctuelle, périodicité distincte
+                # du forfait mensuel du Poste 1).
+                cloture_el = clone(
+                    body_ref,
+                    "Cette intervention fait l'objet d'une facturation ponctuelle, "
+                    "distincte du forfait mensuel d'entretien récurrent.")
+
+                # Espacement compact sur la clôture (évite d'ajouter des lignes).
+                _cl_ppr = cloture_el.find(_qn2("w:pPr"))
+                if _cl_ppr is None:
+                    _cl_ppr = _OxE2("w:pPr"); cloture_el.insert(0, _cl_ppr)
+                _cl_sp = _cl_ppr.find(_qn2("w:spacing"))
+                if _cl_sp is None:
+                    _cl_sp = _OxE2("w:spacing"); _cl_ppr.append(_cl_sp)
+                _cl_sp.set(_qn2("w:before"), "40"); _cl_sp.set(_qn2("w:after"), "20")
+
+                # Insertion après le tableau du Poste 1 : séparateur → tableau →
+                # clôture. (Un paragraphe entre les deux tableaux est requis.)
                 cursor = fin_table._tbl
-                for el in fin_blocks:
+                for el in (sep_el, new_tbl, cloture_el):
                     cursor.addnext(el)
                     cursor = el
+
+                # Le tableau (avec sa ligne d'en-tête) ajoute ~2 lignes vs l'ancien
+                # bloc texte ; par ailleurs, avec un tableau Poste 1 volumineux
+                # (nombreuses zones), la page « Proposition financière » est déjà
+                # remplie et l'image de signature « Bon pour accord » (~2,4 cm)
+                # débordait sur une page blanche parasite (défaut préexistant du
+                # gabarit). On récupère la place en retirant les paragraphes VIDES
+                # superflus (spacing entre les clauses) situés APRÈS la clôture du
+                # Poste 2 et AVANT le bloc signature « SAS MARIE EUGENIE ». On
+                # conserve ainsi le bloc signature (texte + image) sur la même page.
+                _removed = 0
+                _node = cloture_el.getnext()
+                while _node is not None and _removed < 6:
+                    _nxt = _node.getnext()
+                    if _node.tag == _qn2("w:p"):
+                        _t = "".join(x.text or "" for x in
+                                     _node.findall(".//" + _qn2("w:t"))).strip()
+                        _tl = _t.lower()
+                        if _t and ("sas marie" in _tl or "conditions generales" in _tl
+                                   or _t.startswith("----")):
+                            break
+                        _img = (_node.findall(".//" + _qn2("w:drawing"))
+                                or _node.findall(".//" + _qn2("w:pict")))
+                        if (not _t) and (not _img):
+                            _node.getparent().remove(_node)
+                            _removed += 1
+                    _node = _nxt
 
     def insert_moyens_humains_materiels():
         """Bloc « 3 – Moyens humains et matériels » (repris du devis type remise

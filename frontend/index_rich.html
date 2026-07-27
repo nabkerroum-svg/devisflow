@@ -12413,10 +12413,28 @@ function onGabaritChange() {
       // Référence client saisie dans l'interface (peut être vide → non affichée)
       REF_CLIENT: v((dd.info && dd.info.ref_client) || ""),
       TYPE_PRESTATION: v((dd.info && dd.info.type_prestation) || (modeleMetier && modeleMetier.objet_principal) || ""),
-      DEST_LIGNE1: nomComplet || v(cli.raison_sociale),
-      DEST_LIGNE2: nomComplet ? v(cli.raison_sociale) : v(cli.adresse),
-      DEST_LIGNE3: v(cli.adresse) || v([cli.code_postal, cli.ville].filter(Boolean).join(" ")),
-      DEST_LIGNE4: v([cli.code_postal, cli.ville].filter(Boolean).join(" ")) || v(cli.email),
+      // Destinataire : on construit la liste des lignes à la SOURCE (nom, raison
+      // sociale, adresse, CP+ville), puis on retire les doublons — corrige le cas
+      // où l'adresse apparaissait deux fois (ex. sans contact, l'adresse tombait à
+      // la fois sur DEST_LIGNE2 et DEST_LIGNE3).
+      ...(() => {
+        const _cpVille = v([cli.code_postal, cli.ville].filter(Boolean).join(" "));
+        const _parts = [nomComplet, v(cli.raison_sociale), v(cli.adresse), _cpVille];
+        const _lignes = [];
+        for (const _p of _parts) {
+          const _t = (_p || "").trim();
+          if (!_t) continue;                                   // ignorer les vides
+          const _norm = _t.toLowerCase().replace(/\s+/g, " ");
+          if (_lignes.some(l => l.toLowerCase().replace(/\s+/g, " ") === _norm)) continue; // pas de doublon
+          _lignes.push(_t);
+        }
+        return {
+          DEST_LIGNE1: _lignes[0] || "",
+          DEST_LIGNE2: _lignes[1] || "",
+          DEST_LIGNE3: _lignes[2] || "",
+          DEST_LIGNE4: _lignes[3] || "",
+        };
+      })(),
       SITE_ADRESSE: v(site.adresse),
       SITE_CP_VILLE: v([site.code_postal, site.ville].filter(Boolean).join(" ")),
       DATE_PRISE_EFFET: v(dd.date_effet),
