@@ -4570,9 +4570,14 @@ def _compacter_paragraphes_vides(docx_path: Path, max_consecutifs: int = 0):
 # ~109 pt). Le Poste 2 (dynamique) démarre ~1 ligne sous le logo.
 # Prestations : 26 pt (au lieu de 40) = tout le bloc remonté d'~1 ligne (~14 pt),
 # à la demande — les espacements INTERNES de la page sont inchangés (seul le
-# point de départ vertical du titre bouge, le reste suit).
+# point de départ vertical du titre bouge, le reste suit). POSITION VALIDÉE : à
+# ne plus bouger.
+# Poste 2 : 86 pt (au lieu de 30) = bloc descendu de 4 lignes (~56 pt) sous le
+# logo, via un space_before précis (aucun paragraphe vide, aucun saut ajouté). Le
+# titre + l'intro + Hall restent sur la même page (les zones étant des blocs
+# indépendants qui coulent naturellement).
 _MARGE_HAUT_SECTIONS_PT = {
-    "poste2": 30,
+    "poste2": 86,
     "prestations": 26,
     "tracabilite": 26,
 }
