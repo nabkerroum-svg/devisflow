@@ -3399,58 +3399,14 @@ def _aligner_depart_pages_copro(docx_path: Path):
                     for idx, p in enumerate(paragraphs):
                         txt = texte_para(p)
                         if titre_prestations_complementaires in txt:
-                            parent = p.getparent()
-                            if parent is not None:
-                                ppr = p.find("w:pPr", namespaces=ns)
-                                if ppr is None:
-                                    ppr = etree.Element(qn_w("pPr"))
-                                    p.insert(0, ppr)
-                                for page_break in list(ppr.findall("w:pageBreakBefore", namespaces=ns)):
-                                    ppr.remove(page_break)
-                                spacing = ppr.find("w:spacing", namespaces=ns)
-                                if spacing is None:
-                                    spacing = etree.Element(qn_w("spacing"))
-                                    ppr.append(spacing)
-                                spacing.set(qn_w("before"), "0")
-                                spacing.set(qn_w("after"), "0")
-
-                                previous = p.getprevious()
-                                if (
-                                    previous is not None
-                                    and not texte_para(previous)
-                                    and previous.find(".//w:pageBreakBefore", namespaces=ns) is not None
-                                ):
-                                    parent.remove(previous)
-
-                                # Le titre "3" est le premier paragraphe apres le saut de page.
-                                # Dans LibreOffice/PDF, un simple space_before reste dans la zone
-                                # d'habillage du logo flottant et le titre se cale a droite du logo.
-                                # On insere donc un vrai paragraphe d'ancrage invisible, avec une
-                                # ligne non imprimante, pour faire demarrer le bloc sous le logo.
-                                def build_spacer(with_page_break=False):
-                                    spacer = etree.Element(qn_w("p"))
-                                    spacer_ppr = etree.SubElement(spacer, qn_w("pPr"))
-                                    if with_page_break:
-                                        etree.SubElement(spacer_ppr, qn_w("pageBreakBefore"))
-                                    spacer_spacing = etree.SubElement(spacer_ppr, qn_w("spacing"))
-                                    spacer_spacing.set(qn_w("before"), "0")
-                                    spacer_spacing.set(qn_w("after"), "0")
-                                    spacer_r = etree.SubElement(spacer, qn_w("r"))
-                                    spacer_rpr = etree.SubElement(spacer_r, qn_w("rPr"))
-                                    spacer_sz = etree.SubElement(spacer_rpr, qn_w("sz"))
-                                    spacer_sz.set(qn_w("val"), "24")
-                                    spacer_color = etree.SubElement(spacer_rpr, qn_w("color"))
-                                    spacer_color.set(qn_w("val"), "FFFFFF")
-                                    spacer_text = etree.SubElement(spacer_r, qn_w("t"))
-                                    spacer_text.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-                                    spacer_text.text = " "
-                                    return spacer
-
-                                insert_at = parent.index(p)
-                                parent.insert(insert_at, build_spacer(with_page_break=True))
-                                parent.insert(insert_at + 1, build_spacer())
-                                parent.insert(insert_at + 2, build_spacer())
-                                changed = True
+                            # Le saut de page ET la position verticale de la page
+                            # fixe « 3 - Prestations complémentaires » sont désormais
+                            # gérés UNIQUEMENT par _marge_haute_sous_logo (saut
+                            # traînant unique + space_before précis calé sur le
+                            # modèle). On ne touche donc plus à ce titre ici : ni
+                            # suppression de saut, ni ancrages, ni remise à zéro de
+                            # l'espacement — cela évite tout double traitement qui
+                            # déstabilisait la page.
                             continue
                         before_value = next(
                             (value for title, value in titres_a_abaisser.items() if title in txt),
@@ -4579,10 +4535,13 @@ def _compacter_paragraphes_vides(docx_path: Path, max_consecutifs: int = 0):
 # page « traînant » (en fin du paragraphe précédent), ce qui n'absorbe pas
 # l'espacement contrairement au haut d'une page atteinte par simple débordement.
 # ~30 pt placent le titre à ~1 ligne sous le bas visible du logo, proprement.
+# Valeurs calées sur la position du MODÈLE Word de référence (mesurée : titre
+# « 3 - Prestations complémentaires » à ~125 pt du haut, « 4 - Traçabilité » à
+# ~109 pt). Le Poste 2 (dynamique) démarre ~1 ligne sous le logo.
 _MARGE_HAUT_SECTIONS_PT = {
     "poste2": 30,
-    "prestations": 30,
-    "tracabilite": 30,
+    "prestations": 40,
+    "tracabilite": 26,
 }
 
 
