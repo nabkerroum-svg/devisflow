@@ -4568,9 +4568,12 @@ def _compacter_paragraphes_vides(docx_path: Path, max_consecutifs: int = 0):
 # Valeurs calées sur la position du MODÈLE Word de référence (mesurée : titre
 # « 3 - Prestations complémentaires » à ~125 pt du haut, « 4 - Traçabilité » à
 # ~109 pt). Le Poste 2 (dynamique) démarre ~1 ligne sous le logo.
+# Prestations : 26 pt (au lieu de 40) = tout le bloc remonté d'~1 ligne (~14 pt),
+# à la demande — les espacements INTERNES de la page sont inchangés (seul le
+# point de départ vertical du titre bouge, le reste suit).
 _MARGE_HAUT_SECTIONS_PT = {
     "poste2": 30,
-    "prestations": 40,
+    "prestations": 26,
     "tracabilite": 26,
 }
 
