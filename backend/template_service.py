@@ -1002,6 +1002,139 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
             if "reference client" in norm(p.text):
                 return docx_path
 
+        def insert_on_copro_cover():
+            """Réutilise l'emplacement vide de la couverture copro."""
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn as _qn
+
+            body = doc.paragraphs
+            prop_idx = next((i for i, p in enumerate(body) if _short_prop(norm(p.text))), None)
+            if prop_idx is None:
+                return False
+            date_idx = next(
+                (
+                    i for i, p in enumerate(body[:prop_idx])
+                    if "marseille" in norm(p.text) and " le " in f" {norm(p.text)} "
+                ),
+                None,
+            )
+            if date_idx is None:
+                return False
+
+            client_indices = [
+                i for i in range(date_idx + 1, prop_idx)
+                if (body[i].text or "").strip()
+            ]
+            if not client_indices:
+                return False
+            first_client_idx, last_client_idx = client_indices[0], client_indices[-1]
+            blanks_before_client = [
+                body[i] for i in range(date_idx + 1, first_client_idx)
+                if not (body[i].text or "").strip()
+            ]
+            if len(blanks_before_client) < 3:
+                return False
+
+            between = body[last_client_idx + 1:prop_idx]
+            image_anchor = next(
+                (p for p in between if p._element.xpath(".//*[local-name()='shape']")),
+                None,
+            )
+            if image_anchor is None:
+                return False
+            anchor_pos = between.index(image_anchor)
+            before_anchor = between[:anchor_pos]
+            after_anchor = between[anchor_pos + 1:]
+            reserved = next((p for p in after_anchor if not (p.text or "").strip()), None)
+            removable = [
+                p for p in before_anchor
+                if not (p.text or "").strip()
+                and not p._element.xpath(".//*[local-name()='shape']")
+            ]
+            if reserved is None or not removable:
+                return False
+
+            # Destinataire compact et indivisible, avec un interligne naturel.
+            for pos, idx in enumerate(client_indices):
+                pPr = body[idx]._element.get_or_add_pPr()
+                spacing = pPr.find(W + "spacing")
+                if spacing is None:
+                    spacing = OxmlElement("w:spacing")
+                    pPr.append(spacing)
+                spacing.set(_qn("w:before"), "20" if pos == 0 else "0")
+                spacing.set(_qn("w:after"), "0")
+                spacing.attrib.pop(_qn("w:line"), None)
+                spacing.attrib.pop(_qn("w:lineRule"), None)
+                if pPr.find(W + "keepLines") is None:
+                    pPr.append(OxmlElement("w:keepLines"))
+                keep_next = pPr.find(W + "keepNext")
+                if pos < len(client_indices) - 1:
+                    if keep_next is None:
+                        pPr.append(OxmlElement("w:keepNext"))
+                elif keep_next is not None:
+                    pPr.remove(keep_next)
+
+                # Supprimer tout décalage vertical hérité d'un essai précédent.
+                for run in body[idx].runs:
+                    rPr = run._element.get_or_add_rPr()
+                    position = rPr.find(W + "position")
+                    if position is not None:
+                        rPr.remove(position)
+
+            # Les deux paragraphes du modèle rétablis avant le client et le point
+            # ajouté à sa première ligne représentent 24,02 pt dans Word. Retirer
+            # le paragraphe vide sûr placé après le client, puis réduire l'espace
+            # avant du paragraphe d'ancrage, restitue exactement ces 24,02 pt.
+            # L'ancre VML et toutes ses coordonnées restent intactes.
+            removable[-1]._element.getparent().remove(removable[-1]._element)
+            anchor_pPr = image_anchor._element.get_or_add_pPr()
+            anchor_spacing = anchor_pPr.find(W + "spacing")
+            if anchor_spacing is None:
+                anchor_spacing = OxmlElement("w:spacing")
+                anchor_pPr.append(anchor_spacing)
+            anchor_spacing.set(_qn("w:before"), "115")
+
+            # Réutiliser le paragraphe vide immédiatement avant Proposition.
+            for child in list(reserved._element):
+                if child.tag != W + "pPr":
+                    reserved._element.remove(child)
+            pPr = reserved._element.get_or_add_pPr()
+            spacing = pPr.find(W + "spacing")
+            if spacing is None:
+                spacing = OxmlElement("w:spacing")
+                pPr.append(spacing)
+            spacing.set(_qn("w:before"), "0")
+            spacing.set(_qn("w:after"), "0")
+            spacing.set(_qn("w:line"), "240")
+            spacing.set(_qn("w:lineRule"), "auto")
+            jc = pPr.find(W + "jc")
+            if jc is None:
+                jc = OxmlElement("w:jc")
+                pPr.append(jc)
+            jc.set(_qn("w:val"), "left")
+            ind = pPr.find(W + "ind")
+            if ind is None:
+                ind = OxmlElement("w:ind")
+                pPr.append(ind)
+            ind.set(_qn("w:left"), "0")
+            ind.set(_qn("w:firstLine"), "0")
+            if pPr.find(W + "keepLines") is None:
+                pPr.append(OxmlElement("w:keepLines"))
+
+            run = reserved.add_run(line)
+            run.bold = True
+            run.font.name = "Arial"
+            from docx.shared import Pt
+            run.font.size = Pt(16)
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.find(W + "rFonts")
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.insert(0, rFonts)
+            rFonts.set(_qn("w:ascii"), "Arial")
+            rFonts.set(_qn("w:hAnsi"), "Arial")
+            return True
+
         def make_ref_el(style_ref=None):
             """Élément <w:p> « Référence client : … » : aligné à GAUCHE (marge),
             en GRAS, taille 16 pt, sans indentation. On ne clone pas « Proposition »
@@ -1045,6 +1178,13 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
 
         def _short_prop(n):
             return len(n) < 40 and (n.startswith("proposition ") or n.startswith("devis "))
+
+        # Couverture copro : préserver strictement le modèle et réutiliser son
+        # paragraphe réservé, sans cadre, positionnement flottant ou marge ajoutée.
+        if insert_on_copro_cover():
+            doc.save(str(docx_path))
+            _nettoyer_doublons_zip(docx_path)
+            return docx_path
 
         # --- Stratégie 1 (préférée) : « Proposition »/« Devis » dans le CORPS ---
         # → référence placée en haut de l'espace vide gauche, sous le bloc client.
