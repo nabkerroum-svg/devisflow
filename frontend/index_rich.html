@@ -6255,25 +6255,14 @@ const state = {
     photos: [],           // [{id, dataUrl, name, tag, image_size, image_align, image_width_pct}]
     proposition_financiere: {
       mode: "simple",
-      lignes: [{
-        id: "line-default",
-        designation: "Selon descriptif",
-        description: "",
-        quantite: "",
-        unite: "",
-        prix_unitaire_ht: "",
-        total_ht: 180,
-        taux_tva: 20,
-        type_ligne: "prestation",
-        inclure_total: true,
-      }],
+      lignes: [],
       note_active: false,
       note: "",
       note_tva_active: false,
       note_tva: "",
       colonnes: { quantite: true, unite: true, prix_unitaire_ht: true, description: true },
     },
-    totaux: { ht: 180, tva: 36, ttc: 216 },
+    totaux: { ht: 0, tva: 0, ttc: 0 },
     conditions_code: "",
     date_emission: todayISO(),
     date_effet: "",
@@ -6846,25 +6835,14 @@ function newDevis() {
     photos: [],
     proposition_financiere: {
       mode: "simple",
-      lignes: [{
-        id: "line-default",
-        designation: "Selon descriptif",
-        description: "",
-        quantite: "",
-        unite: "",
-        prix_unitaire_ht: "",
-        total_ht: 180,
-        taux_tva: 20,
-        type_ligne: "prestation",
-        inclure_total: true,
-      }],
+      lignes: [],
       note_active: false,
       note: "",
       note_tva_active: false,
       note_tva: "",
       colonnes: { quantite: true, unite: true, prix_unitaire_ht: true, description: true },
     },
-    totaux: { ht: 180, tva: 36, ttc: 216 },
+    totaux: { ht: 0, tva: 0, ttc: 0 },
     conditions_code: "",
     date_emission: todayISO(),
     date_effet: "",
@@ -7612,27 +7590,14 @@ function renderZones() {
               `}
             </div>
 
-            <!-- Prix HT de la zone : si renseigné, il PRIME sur le calcul auto et
-                 apparaît tel quel dans le tableau financier / aperçu / DOCX / PDF. -->
-            <div class="zone-prix-slot" style="margin-top:10px;padding:10px 12px;border:1px dashed #d8d3c8;border-radius:8px;background:#fafaf8">
-              <label style="display:block;font:600 12px Arial;color:#3a352c;margin-bottom:6px">
-                Prix HT mensuel de cette zone (€) <span style="font-weight:400;color:#8c877c">— laissez vide pour le calcul automatique</span>
-              </label>
-              <input type="number" min="0" step="0.01"
-                     value="${z.prix_ht != null && z.prix_ht !== '' ? z.prix_ht : ''}"
-                     placeholder="ex : 180"
-                     oninput="setZonePrix(${i}, this.value)"
-                     style="width:160px;font:13px Arial;padding:7px;border:1px solid #d8d3c8;border-radius:6px">
-            </div>
-
-            <!-- Option complémentaire de la zone (discrète, repliée par défaut) -->
+            <!-- Option complémentaire descriptive de la zone (sans incidence financière) -->
             <div class="zone-option-slot" style="margin-top:10px;padding:10px 12px;border:1px dashed #d8d3c8;border-radius:8px;background:#fafaf8">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font:600 12px Arial;color:#3a352c">
                 <input type="checkbox" ${z.option_active ? "checked" : ""} onchange="toggleZoneOption(${i}, this.checked)">
                 + Activer une option complémentaire pour cette zone
               </label>
               ${z.option_active ? `
-                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
                   <label style="font:11px Arial;color:#8c877c">Désignation
                     <input value="${escapeHtml(z.option_libelle || '')}" placeholder="ex : Vitrerie trimestrielle"
                       oninput="setZoneOption(${i},'option_libelle',this.value)"
@@ -7642,10 +7607,6 @@ function renderZones() {
                       style="width:100%;font:12px Arial;padding:6px;border:1px solid #d8d3c8;border-radius:6px">
                       ${state.biblio.frequences.map(f => `<option ${z.option_frequence===f?'selected':''}>${f}</option>`).join('')}
                     </select></label>
-                  <label style="font:11px Arial;color:#8c877c">Prix HT (€)
-                    <input type="number" min="0" step="0.01" value="${z.option_prix_ht != null ? z.option_prix_ht : ''}" placeholder="ex : 80"
-                      oninput="setZoneOption(${i},'option_prix_ht',this.value)"
-                      style="width:100%;font:12px Arial;padding:6px;border:1px solid #d8d3c8;border-radius:6px"></label>
                 </div>
               ` : ""}
             </div>
@@ -7701,14 +7662,6 @@ function toggleZoneOption(i, on) {
 
 function setZoneOption(i, key, value) {
   state.devis.zones[i][key] = value;
-  if (typeof updatePreview === "function") updatePreview();
-  if (typeof saveDraft === "function") saveDraft();
-}
-
-function setZonePrix(i, value) {
-  // Prix HT propre à la zone (override). Vide ⇒ null ⇒ calcul automatique.
-  const n = parseFloat(value);
-  state.devis.zones[i].prix_ht = (value === "" || !isFinite(n)) ? null : n;
   if (typeof updatePreview === "function") updatePreview();
   if (typeof saveDraft === "function") saveDraft();
 }
@@ -7950,12 +7903,12 @@ function removePhoto(id) {
 function createFinancialLine(seed = {}) {
   return {
     id: seed.id || ("line-" + Date.now() + "-" + Math.random().toString(16).slice(2)),
-    designation: seed.designation ?? seed.libelle ?? "Selon descriptif",
+    designation: seed.designation ?? seed.libelle ?? "",
     description: seed.description ?? "",
     quantite: seed.quantite ?? "",
     unite: seed.unite ?? "",
     prix_unitaire_ht: seed.prix_unitaire_ht ?? "",
-    total_ht: seed.total_ht ?? seed.ht ?? 0,
+    total_ht: seed.total_ht ?? seed.ht ?? "",
     taux_tva: seed.taux_tva ?? 20,
     type_ligne: seed.type_ligne ?? seed.type ?? "prestation",
     inclure_total: seed.inclure_total !== false,
@@ -7965,7 +7918,7 @@ function createFinancialLine(seed = {}) {
 function defaultFinancialProposal() {
   return {
     mode: "simple",
-    lignes: [createFinancialLine({ designation: "Selon descriptif", total_ht: 180, taux_tva: 20 })],
+    lignes: [],
     note_active: false,
     note: "",
     note_tva_active: false,
@@ -7985,27 +7938,25 @@ function parseNumFr(value) {
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
 function calcFinancialLine(line) {
+  line = line || {};
+  const hasValue = value => value !== null && value !== undefined && String(value).trim() !== "";
   const qty = parseNumFr(line.quantite);
   const pu = parseNumFr(line.prix_unitaire_ht);
   let ht = parseNumFr(line.total_ht);
-  if (qty && pu) ht = qty * pu;
+  if (hasValue(line.quantite) && hasValue(line.prix_unitaire_ht)) ht = qty * pu;
   if (line.type_ligne === "remise" && ht > 0) ht = -ht;
-  const tvaRate = parseNumFr(line.taux_tva || 20) / 100;
-  const tva = round2(ht * tvaRate);
-  const ttc = round2(ht + tva);
-  return { ht: round2(ht), tva, ttc };
+  const taux = hasValue(line.taux_tva) ? parseNumFr(line.taux_tva) : 20;
+  const tva = ht * (taux / 100);
+  const ttc = ht + tva;
+  return { ht, taux, tva, ttc };
 }
 
 function ensureFinancialModel() {
   if (!state.devis.proposition_financiere) {
     state.devis.proposition_financiere = defaultFinancialProposal();
-    const legacyHt = state.devis.totaux && parseNumFr(state.devis.totaux.ht);
-    if (legacyHt) state.devis.proposition_financiere.lignes[0].total_ht = legacyHt;
   }
   const pf = state.devis.proposition_financiere;
-  if (!Array.isArray(pf.lignes) || !pf.lignes.length) {
-    pf.lignes = [createFinancialLine({ total_ht: state.devis.totaux?.ht || 180 })];
-  }
+  if (!Array.isArray(pf.lignes)) pf.lignes = [];
   pf.lignes = pf.lignes.map(createFinancialLine);
   if (!pf.mode) pf.mode = pf.lignes.length > 1 ? "detaillee" : "simple";
   if (!pf.colonnes) pf.colonnes = { quantite: true, unite: true, prix_unitaire_ht: true, description: true };
@@ -8017,8 +7968,8 @@ function recalcFinancials({ render = false, preview = true } = {}) {
   let totalHt = 0, totalTva = 0, totalTtc = 0;
   pf.lignes.forEach(line => {
     const c = calcFinancialLine(line);
-    line.montant_tva = c.tva;
-    line.total_ttc = c.ttc;
+    line.montant_tva = round2(c.tva);
+    line.total_ttc = round2(c.ttc);
     if (line.inclure_total !== false && !["information", "info", "sous_total", "sous-total", "total_general"].includes(line.type_ligne)) {
       totalHt += c.ht;
       totalTva += c.tva;
@@ -8177,7 +8128,7 @@ function setFinancialLine(idx, key, value) {
 function addFinancialLine(seed) {
   const pf = ensureFinancialModel();
   if (pf.mode === "simple") pf.mode = "detaillee";
-  pf.lignes.push(createFinancialLine(seed || { designation: "Nouvelle ligne", total_ht: 0, taux_tva: 20 }));
+  pf.lignes.push(createFinancialLine(seed || { designation: "", total_ht: "", taux_tva: 20 }));
   renderFinancialEditor();
   recalcFinancials();
   saveDraftQuiet();
@@ -8185,8 +8136,9 @@ function addFinancialLine(seed) {
 
 function removeFinancialLine(idx) {
   const pf = ensureFinancialModel();
-  if (pf.lignes.length <= 1) return;
+  if (!pf.lignes[idx]) return;
   pf.lignes.splice(idx, 1);
+  if (pf.lignes.length <= 1) pf.mode = "simple";
   renderFinancialEditor();
   recalcFinancials();
   saveDraftQuiet();
@@ -8715,7 +8667,7 @@ function updatePreview() {
           ${pf.lignes.map(line => {
             const c = calcFinancialLine(line);
             return `<tr>
-              <td>${escapeHtml(line.designation || "Selon descriptif")}${line.description ? `<br><small>${escapeHtml(line.description)}</small>` : ""}${line.inclure_total === false ? `<br><small>Option hors total</small>` : ""}</td>
+              <td>${escapeHtml(line.designation || "")}${line.description ? `<br><small>${escapeHtml(line.description)}</small>` : ""}${line.inclure_total === false ? `<br><small>Option hors total</small>` : ""}</td>
               ${detailed ? `<td>${escapeHtml(line.quantite || "")}</td><td>${line.prix_unitaire_ht ? fmtEur(parseNumFr(line.prix_unitaire_ht)) : ""}</td>` : ""}
               <td><span class="pv-hl">${fmtEur(c.ht)}</span></td>
               <td><span class="pv-hl">${fmtEur(c.tva)}</span></td>
@@ -12353,29 +12305,12 @@ function onGabaritChange() {
     const cli = dd.client || {};
     const site = dd.site || {};
     const v = (x) => (x === undefined || x === null) ? "" : String(x);
-    const parseMoney = (x) => {
-      if (x === undefined || x === null || x === "") return 0;
-      if (typeof x === "number") return isFinite(x) ? x : 0;
-      const n = parseFloat(String(x).replace(/\s/g, "").replace("€", "").replace("%", "").replace(",", "."));
-      return isFinite(n) ? n : 0;
-    };
-    const calcLine = (line) => {
-      const qty = parseMoney(line.quantite);
-      const pu = parseMoney(line.prix_unitaire_ht);
-      let ht = parseMoney(line.total_ht ?? line.ht);
-      if (qty && pu) ht = qty * pu;
-      if (line.type_ligne === "remise" && ht > 0) ht = -ht;
-      const taux = parseMoney(line.taux_tva || 20);
-      const tva = Math.round(ht * (taux / 100) * 100) / 100;
-      return { ht: Math.round(ht * 100) / 100, tva, ttc: Math.round((ht + tva) * 100) / 100 };
-    };
     const pfSource = dd.proposition_financiere || {};
-    const rawFinancialLines = Array.isArray(pfSource.lignes) && pfSource.lignes.length
-      ? pfSource.lignes
-      : [{ designation: (dd.info && dd.info.type_prestation) || "Selon descriptif", total_ht: dd.totaux?.ht || 0, taux_tva: 20, type_ligne: "prestation", inclure_total: true }];
+    const rawFinancialLines = Array.isArray(pfSource.lignes) ? pfSource.lignes : [];
     let financialTotalHt = 0, financialTotalTva = 0, financialTotalTtc = 0;
-    const financialLines = rawFinancialLines.map((line, idx) => {
-      const c = calcLine(line || {});
+    const financialLines = rawFinancialLines.map((line) => {
+      line = line || {};
+      const c = calcFinancialLine(line);
       const include = line && line.inclure_total !== false && !["information", "info", "sous_total", "sous-total", "total_general"].includes(line.type_ligne);
       if (include) {
         financialTotalHt += c.ht;
@@ -12383,15 +12318,15 @@ function onGabaritChange() {
         financialTotalTtc += c.ttc;
       }
       return {
-        designation: v(line.designation || line.libelle || `Ligne ${idx + 1}`),
+        designation: v(line.designation || line.libelle || ""),
         description: v(line.description || ""),
-        quantite: v(line.quantite || ""),
+        quantite: v(line.quantite ?? ""),
         unite: v(line.unite || ""),
-        prix_unitaire_ht: v(line.prix_unitaire_ht || ""),
-        total_ht: c.ht,
-        taux_tva: parseMoney(line.taux_tva || 20),
-        montant_tva: c.tva,
-        total_ttc: c.ttc,
+        prix_unitaire_ht: v(line.prix_unitaire_ht ?? ""),
+        total_ht: round2(c.ht),
+        taux_tva: c.taux,
+        montant_tva: round2(c.tva),
+        total_ttc: round2(c.ttc),
         type_ligne: v(line.type_ligne || line.type || "prestation"),
         inclure_total: line.inclure_total !== false,
       };
@@ -12497,7 +12432,8 @@ function onGabaritChange() {
         zonesSelectionnees.push(back);
         variables[`OPS_${back.toUpperCase()}`] = activeOps;
         variables[`OPS_ENABLED_${back.toUpperCase()}`] = opsEnabled;
-        // Détail pour le tableau financier dynamique (+ option par zone si activée)
+        // Détail descriptif de la zone. Les prix restent exclusivement dans
+        // proposition_financiere.lignes et ne sont jamais déduits des zones.
         zonesDetail.push({
           code: back, titre: z.titre || back, frequence: freq,
           operations: activeOps,
@@ -12506,11 +12442,9 @@ function onGabaritChange() {
           prestations_libres: Array.isArray(z.prestations_libres)
             ? z.prestations_libres.map(x => v(x)).filter(x => x && x.trim())
             : [],
-          prix_ht: (z.prix_ht != null && z.prix_ht !== "") ? z.prix_ht : null,
           option_active: !!z.option_active,
           option_libelle: v(z.option_libelle || ""),
           option_frequence: v(z.option_frequence || ""),
-          option_prix_ht: (z.option_prix_ht != null && z.option_prix_ht !== "") ? z.option_prix_ht : null,
         });
       });
       // repli éventuel sur un sélecteur dédié
@@ -12544,16 +12478,9 @@ function onGabaritChange() {
       variables,
       lignes,
       frequences_options: [],
-      // Prix : si l'utilisateur a saisi un Montant HT global (section Tarif),
-      // on le transmet comme override (prix_force_ht). Pour le récurrent, chaque
-      // zone peut aussi porter son propre prix (zones_detail[].prix_ht).
-      prix_force_ht: financialTotalHt > 0 ? Math.round(financialTotalHt * 100) / 100 : (function () {
-        const t = dd.totaux || {};
-        const ht = (t.force_ht != null && t.force_ht !== "") ? t.force_ht
-                 : (t.ht != null && t.ht !== "" ? t.ht : null);
-        const n = parseFloat(ht);
-        return (isFinite(n) && n > 0) ? n : null;
-      })(),
+      // Compatibilité du calcul historique : uniquement lorsqu'au moins une
+      // ligne financière explicite existe. Une liste vide reste strictement vide.
+      prix_force_ht: financialLines.length ? round2(financialTotalHt) : null,
       mode_financier: v(pfSource.mode || (financialLines.length > 1 ? "detaillee" : "simple")),
       lignes_financieres: financialLines,
       note_financiere: v(pfSource.note || ""),

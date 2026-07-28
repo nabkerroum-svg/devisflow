@@ -1307,7 +1307,9 @@ def _verrouiller_separation_couverture_presentation(docx_path: Path) -> Path:
         if rep_spacing is None:
             rep_spacing = OxmlElement("w:spacing")
             rep_pPr.append(rep_spacing)
-        rep_spacing.set(qn("w:before"), "0")
+        # Conserve 374 twips de la réserve verticale de la couverture afin
+        # d'aligner ce bloc sur le haut visuel du logo Petit Futé.
+        rep_spacing.set(qn("w:before"), "374")
 
         def _vide_supprimable(p):
             if (p.text or "").strip():
@@ -3124,10 +3126,23 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     txt = txt.replace("{{ opt.ttc }}", str(opt.get("ttc", "")))
                     run.text = txt
 
+    financial_row_template_tr = None
+
     def expand_options_tables():
-        options = data.get("OPTIONS") or []
-        if not isinstance(options, list):
-            options = []
+        nonlocal financial_row_template_tr
+        financial_lines = data.get("FINANCIAL_LINES") or []
+        if not isinstance(financial_lines, list):
+            financial_lines = []
+        options = [
+            {
+                "libelle": line.get("designation", ""),
+                "ht": line.get("total_ht_fmt", ""),
+                "tva": line.get("montant_tva_fmt", ""),
+                "ttc": line.get("total_ttc_fmt", ""),
+            }
+            for line in financial_lines
+            if isinstance(line, dict)
+        ]
         for table in doc.tables:
             rows = list(table.rows)
             for idx, row in enumerate(rows):
@@ -3137,12 +3152,16 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                     continue
                 template_row = rows[idx + 1]
                 template_tr = copy.deepcopy(template_row._tr)
+                financial_row_template_tr = copy.deepcopy(template_tr)
                 tbl = table._tbl
-                opts = [opt for opt in options if isinstance(opt, dict)] or [{}]
-                fill_option_row(template_row, opts[0])
+                opts = [opt for opt in options if isinstance(opt, dict)]
                 if idx + 2 < len(rows):
                     tbl.remove(rows[idx + 2]._tr)
                 tbl.remove(rows[idx]._tr)
+                if not opts:
+                    tbl.remove(template_row._tr)
+                    return
+                fill_option_row(template_row, opts[0])
                 for opt in opts[1:]:
                     new_tr = copy.deepcopy(template_tr)
                     tbl.append(new_tr)
@@ -3545,6 +3564,9 @@ def _generer_copro_petite_preserve_layout(template_path: Path, data: Dict, outpu
                 # descriptifs et n'alimentent PAS ce tableau.
                 new_tbl = _copy.deepcopy(fin_table._tbl)
                 _rows = new_tbl.findall(_qn2("w:tr"))
+                if len(_rows) < 2 and financial_row_template_tr is not None:
+                    new_tbl.append(_copy.deepcopy(financial_row_template_tr))
+                    _rows = new_tbl.findall(_qn2("w:tr"))
                 for r in _rows[2:]:
                     new_tbl.remove(r)
 

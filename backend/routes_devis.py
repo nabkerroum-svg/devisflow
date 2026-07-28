@@ -363,8 +363,8 @@ class DevisPayload(BaseModel):
     # Phase 2B : équipements sélectionnés à illustrer en photo dans le devis
     # [{code, libelle}] — la photo est résolue côté serveur depuis la base.
     equipements: List[Dict[str, Any]] = []
-    # Proposition financiere enrichie. Compatibilite : si cette liste est vide,
-    # l'ancien prix_force_ht est converti en une ligne simple.
+    # Proposition financière enrichie. Une liste vide reste vide : aucune ligne
+    # n'est déduite d'un prix global ou d'une zone.
     mode_financier: str = "simple"
     lignes_financieres: List[Dict[str, Any]] = []
     note_financiere: str = ""
@@ -372,9 +372,9 @@ class DevisPayload(BaseModel):
     # Finition : codes des zones de prestation cochées (récurrent). Les zones non
     # listées ici sont MASQUÉES dans le document (SHOW_* = False).
     zones_selectionnees: List[str] = []
-    # Détail par zone pour le tableau financier dynamique :
-    # [{code, titre, frequence, option_active, option_libelle, option_frequence, option_prix_ht}]
-    # Seules les zones cochées y figurent ; le tableau est construit à partir de ça.
+    # Détail descriptif par zone :
+    # [{code, titre, frequence, operations, prestations_libres, option_active, ...}]
+    # Seules les zones cochées y figurent ; aucune donnée financière n'en est déduite.
     zones_detail: List[Dict[str, Any]] = []
     # Poste 2 — Remise en état PONCTUELLE (récurrent copro). Distinct du forfait
     # mensuel (Poste 1). N'est facturé QUE si prix_ht est renseigné.
@@ -609,28 +609,18 @@ def _format_date_emission_fr(value: Any) -> tuple[str, str]:
 
 
 def _normaliser_lignes_financieres(payload: "DevisPayload", res: P.ResultatDevis, data: Dict[str, Any]) -> Dict[str, Any]:
-    """Construit le tableau financier final, avec compatibilite prix unique."""
+    """Construit le tableau financier depuis les seules lignes explicites."""
     raw_lines = [l for l in (payload.lignes_financieres or []) if isinstance(l, dict)]
-
-    if not raw_lines:
-        designation = (
-            str(data.get("FORFAIT_LIBELLE") or data.get("OPTION_LIBELLE") or data.get("TYPE_PRESTATION") or "").strip()
-            or "Selon descriptif"
-        )
-        raw_lines = [{
-            "designation": designation,
-            "total_ht": payload.prix_force_ht if payload.prix_force_ht is not None else res.total_ht,
-            "taux_tva": payload.taux_tva,
-            "type_ligne": "prestation",
-            "inclure_total": True,
-        }]
 
     normalized = []
     total_ht = total_tva = total_ttc = 0.0
     uses_qty = uses_unit = uses_unit_price = uses_description = False
 
-    for idx, line in enumerate(raw_lines):
-        designation = str(line.get("designation") or line.get("libelle") or "").strip() or f"Ligne {idx + 1}"
+    def _renseigne(value: Any) -> bool:
+        return value is not None and str(value).strip() != ""
+
+    for line in raw_lines:
+        designation = str(line.get("designation") or line.get("libelle") or "").strip()
         description = str(line.get("description") or "").strip()
         type_ligne = str(line.get("type_ligne") or line.get("type") or "prestation").strip().lower()
         if type_ligne == "option" or line.get("option") is True:
@@ -643,20 +633,27 @@ def _normaliser_lignes_financieres(payload: "DevisPayload", res: P.ResultatDevis
         qty_raw = line.get("quantite", line.get("qty", ""))
         unit = str(line.get("unite") or line.get("unit") or "").strip()
         pu_raw = line.get("prix_unitaire_ht", line.get("pu_ht", line.get("unit_price_ht", "")))
+        ht_raw = line.get("total_ht", line.get("ht", ""))
+        if not designation and not _renseigne(ht_raw) and not _renseigne(qty_raw) and not _renseigne(pu_raw):
+            continue
+
         qty = _parse_float_fr(qty_raw, 0.0)
         unit_price = _parse_float_fr(pu_raw, 0.0)
-        total_line_ht = _parse_float_fr(line.get("total_ht", line.get("ht", "")), 0.0)
+        total_line_ht = _parse_float_fr(ht_raw, 0.0)
 
-        if qty and unit_price:
+        if _renseigne(qty_raw) and _renseigne(pu_raw):
             total_line_ht = qty * unit_price
         if type_ligne == "remise" and total_line_ht > 0:
             total_line_ht = -total_line_ht
 
-        tva_rate = _parse_float_fr(line.get("taux_tva", line.get("tva_rate", payload.taux_tva)), payload.taux_tva)
+        tva_raw = line.get("taux_tva", line.get("tva_rate"))
+        if not _renseigne(tva_raw):
+            tva_raw = payload.taux_tva
+        tva_rate = _parse_float_fr(tva_raw, payload.taux_tva)
         if tva_rate > 1:
             tva_rate = tva_rate / 100
-        montant_tva = round(total_line_ht * tva_rate, 2)
-        total_line_ttc = round(total_line_ht + montant_tva, 2)
+        montant_tva = total_line_ht * tva_rate
+        total_line_ttc = total_line_ht + montant_tva
 
         is_info = type_ligne in {"information", "info"}
         is_total_like = type_ligne in {"sous-total", "sous_total", "subtotal", "total", "total_general"}
@@ -799,22 +796,9 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
                 libres = detail.get("prestations_libres")
                 if isinstance(libres, list):
                     data[f"LIBRE_{key}"] = [str(x).strip() for x in libres if str(x).strip()]
-        # Tableau financier : DYNAMIQUE à partir des zones réellement cochées
-        # (et leurs options activées). On ne montre QUE ce qui est sélectionné.
-        if payload.zones_detail:
-            base_l = payload.lignes[0] if payload.lignes else {"duree_h": 2, "nb_agents": 1, "taux_horaire": 24}
-            data["OPTIONS"] = P.construire_tableau_zones(
-                payload.zones_detail, base_l, taux_tva_global=payload.taux_tva
-            )
-        elif payload.frequences_options and payload.lignes:
-            data["OPTIONS"] = P.construire_options_recurrentes(
-                payload.lignes[0], payload.frequences_options, taux_tva_global=payload.taux_tva
-            )
-        elif "OPTIONS" not in data:
-            data["OPTIONS"] = [{
-                "libelle": payload.variables.get("OPTION_LIBELLE", "Prestation"),
-                "ht": res.total_ht_fmt, "tva": res.total_tva_fmt, "ttc": res.total_ttc_fmt,
-            }]
+        # Les zones et leurs options restent purement descriptives. Le tableau
+        # financier est alimenté plus bas par les seules lignes explicites.
+        data["OPTIONS"] = []
     else:
         if "PRESTATIONS" not in data:
             data["PRESTATIONS"] = [l.get("libelle", "") for l in lignes_calc if l.get("libelle")]
@@ -903,8 +887,8 @@ def _construire_data(payload: "DevisPayload", recurrent: bool, session=None):
         if prix_ht > 0:
             taux = _parse_float_fr(re_data.get("tva"), payload.taux_tva * 100)
             taux_rate = taux / 100 if taux > 1 else taux
-            montant_tva = round(prix_ht * taux_rate, 2)
-            ttc = round(prix_ht + montant_tva, 2)
+            montant_tva = prix_ht * taux_rate
+            ttc = prix_ht + montant_tva
             data["REMISE_A_PRIX"] = True
             data["REMISE_HT"] = P.fmt_euros(prix_ht)
             data["REMISE_TVA"] = P.fmt_euros(montant_tva)
