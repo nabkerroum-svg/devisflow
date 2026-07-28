@@ -1002,6 +1002,129 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
             if "reference client" in norm(p.text):
                 return docx_path
 
+        def _inserer_dans_emplacement_copro():
+            """Réutilise le blanc réservé de la couverture sans allonger son flux."""
+            from docx.oxml import OxmlElement
+            from docx.oxml.ns import qn as _qn
+            from docx.shared import Pt
+
+            body = doc.paragraphs
+            prop_idx = next(
+                (
+                    i for i, p in enumerate(body)
+                    if len(norm(p.text)) < 40
+                    and (
+                        norm(p.text).startswith("proposition ")
+                        or norm(p.text).startswith("devis ")
+                    )
+                ),
+                None,
+            )
+            if prop_idx is None:
+                return False
+
+            date_idx = next(
+                (
+                    i for i, p in enumerate(body[:prop_idx])
+                    if "marseille" in norm(p.text) and " le " in f" {norm(p.text)} "
+                ),
+                None,
+            )
+            if date_idx is None:
+                return False
+
+            non_vides = [
+                i for i in range(date_idx + 1, prop_idx)
+                if (body[i].text or "").strip()
+            ]
+            if not non_vides:
+                return False
+            dernier_client = non_vides[-1]
+            entre = body[dernier_client + 1:prop_idx]
+            ancre_image = next(
+                (p for p in entre if p._element.xpath(".//*[local-name()='shape']")),
+                None,
+            )
+            if ancre_image is None:
+                return False
+
+            pos_ancre = entre.index(ancre_image)
+            avant_ancre = entre[:pos_ancre]
+            apres_ancre = entre[pos_ancre + 1:]
+            blanc_compensation = next(
+                (
+                    p for p in reversed(avant_ancre)
+                    if not (p.text or "").strip()
+                    and not p._element.xpath(".//*[local-name()='shape']")
+                ),
+                None,
+            )
+            emplacement_reference = next(
+                (
+                    p for p in apres_ancre
+                    if not (p.text or "").strip()
+                    and not p._element.xpath(".//*[local-name()='shape']")
+                ),
+                None,
+            )
+            if blanc_compensation is None or emplacement_reference is None:
+                return False
+
+            # Le blanc réutilisé vaut une ligne naturelle (~12 pt). Une référence
+            # de deux lignes en Arial 16 pt ajoute ~20 pt. On récupère cette hauteur
+            # sans toucher aux images : suppression d'un blanc sûr (~12 pt), puis
+            # réduction de 8 pt du space_before du paragraphe qui porte l'image.
+            blanc_compensation._element.getparent().remove(blanc_compensation._element)
+            anchor_pPr = ancre_image._element.get_or_add_pPr()
+            anchor_spacing = anchor_pPr.find(W + "spacing")
+            if anchor_spacing is None:
+                anchor_spacing = OxmlElement("w:spacing")
+                anchor_pPr.append(anchor_spacing)
+            anchor_spacing.set(_qn("w:before"), "80")
+
+            for child in list(emplacement_reference._element):
+                if child.tag != W + "pPr":
+                    emplacement_reference._element.remove(child)
+            pPr = emplacement_reference._element.get_or_add_pPr()
+            spacing = pPr.find(W + "spacing")
+            if spacing is None:
+                spacing = OxmlElement("w:spacing")
+                pPr.append(spacing)
+            spacing.set(_qn("w:before"), "0")
+            spacing.set(_qn("w:after"), "0")
+            spacing.set(_qn("w:line"), "240")
+            spacing.set(_qn("w:lineRule"), "auto")
+
+            jc = pPr.find(W + "jc")
+            if jc is None:
+                jc = OxmlElement("w:jc")
+                pPr.append(jc)
+            jc.set(_qn("w:val"), "left")
+            ind = pPr.find(W + "ind")
+            if ind is None:
+                ind = OxmlElement("w:ind")
+                pPr.append(ind)
+            ind.set(_qn("w:left"), "0")
+            ind.set(_qn("w:firstLine"), "0")
+            if pPr.find(W + "keepLines") is None:
+                pPr.append(OxmlElement("w:keepLines"))
+
+            run = emplacement_reference.add_run(line)
+            run.bold = True
+            run.font.name = "Arial"
+            run.font.size = Pt(16)
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.find(W + "rFonts")
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.insert(0, rFonts)
+            rFonts.set(_qn("w:ascii"), "Arial")
+            rFonts.set(_qn("w:hAnsi"), "Arial")
+            position = rPr.find(W + "position")
+            if position is not None:
+                rPr.remove(position)
+            return True
+
         def make_ref_el(style_ref=None):
             """Élément <w:p> « Référence client : … » : aligné à GAUCHE (marge),
             en GRAS, taille 16 pt, sans indentation. On ne clone pas « Proposition »
@@ -1045,6 +1168,11 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
 
         def _short_prop(n):
             return len(n) < 40 and (n.startswith("proposition ") or n.startswith("devis "))
+
+        if _inserer_dans_emplacement_copro():
+            doc.save(str(docx_path))
+            _nettoyer_doublons_zip(docx_path)
+            return docx_path
 
         # --- Stratégie 1 (préférée) : « Proposition »/« Devis » dans le CORPS ---
         # → référence placée en haut de l'espace vide gauche, sous le bloc client.
@@ -1095,6 +1223,142 @@ def _inserer_reference_client(docx_path: Path, ref) -> Path:
     return docx_path
 
 
+def _verrouiller_separation_couverture_presentation(docx_path: Path) -> Path:
+    """Stabilise la frontière couverture/présentation du modèle copro normalisé.
+
+    Cette correction est appliquée APRÈS le ré-export LibreOffice. Elle restaure
+    les espacements natifs de la couverture, supprime uniquement les séparateurs
+    vides placés entre son dernier texte et la Présentation, puis pose une unique
+    frontière `pageBreakBefore` sur le titre. Les paragraphes de réservation et
+    les ancres graphiques de la couverture ne sont jamais déplacés ni supprimés.
+    """
+    if not docx_path.exists():
+        return docx_path
+    try:
+        from docx import Document as _Doc
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        import re as _re
+        import unicodedata as _ud
+
+        doc = _Doc(str(docx_path))
+        body = doc.paragraphs
+
+        def _norm(value):
+            value = (value or "").lower().replace("\xa0", " ")
+            value = _ud.normalize("NFKD", value)
+            value = "".join(c for c in value if not _ud.combining(c))
+            return _re.sub(r"\s+", " ", value).strip()
+
+        titre_idx = next(
+            (
+                i for i, p in enumerate(body)
+                if _norm(p.text).startswith("1 - presentation de la societe marie eugenie")
+            ),
+            None,
+        )
+        if titre_idx is None:
+            return docx_path
+
+        representant_idx = next(
+            (
+                i for i, p in enumerate(body[:titre_idx])
+                if _norm(p.text) == "societe marie eugenie"
+            ),
+            None,
+        )
+        if representant_idx is None:
+            return docx_path
+
+        proposition_idx = next(
+            (
+                i for i, p in enumerate(body[:representant_idx])
+                if _norm(p.text).startswith(("proposition ", "devis "))
+            ),
+            None,
+        )
+        if proposition_idx is None:
+            return docx_path
+
+        # LibreOffice ajoute 200 twips après l'ancre de la première image de
+        # couverture. Le modèle source n'en contient pas : conserver cet ajout
+        # consomme inutilement une partie du budget vertical.
+        premiere_image_idx = next(
+            (
+                i for i, p in enumerate(body[:proposition_idx])
+                if p._element.xpath(
+                    ".//*[local-name()='drawing' or local-name()='shape']"
+                )
+            ),
+            None,
+        )
+        if premiere_image_idx is not None:
+            image_pPr = body[premiere_image_idx]._element.get_or_add_pPr()
+            image_spacing = image_pPr.find(qn("w:spacing"))
+            if image_spacing is None:
+                image_spacing = OxmlElement("w:spacing")
+                image_pPr.append(image_spacing)
+            image_spacing.set(qn("w:after"), "0")
+
+        # LibreOffice matérialise aussi 720 twips avant « Société Marie
+        # Eugénie », valeur absente du modèle source. La valeur native est nulle.
+        rep_pPr = body[representant_idx]._element.get_or_add_pPr()
+        rep_spacing = rep_pPr.find(qn("w:spacing"))
+        if rep_spacing is None:
+            rep_spacing = OxmlElement("w:spacing")
+            rep_pPr.append(rep_spacing)
+        rep_spacing.set(qn("w:before"), "0")
+
+        def _vide_supprimable(p):
+            if (p.text or "").strip():
+                return False
+            el = p._element
+            interdits = (
+                "drawing", "pict", "shape", "br", "bookmarkStart",
+                "bookmarkEnd", "sectPr", "hyperlink",
+            )
+            return not any(
+                el.xpath(f".//*[local-name()='{name}']")
+                for name in interdits
+            )
+
+        # Aucun élément de couverture ne doit être solidaire du titre suivant.
+        for p in body[representant_idx:titre_idx]:
+            pPr = p._element.get_or_add_pPr()
+            keep_next = pPr.find(qn("w:keepNext"))
+            if keep_next is not None:
+                pPr.remove(keep_next)
+
+        # Les paragraphes vides qui suivent le téléphone servaient jusque-là à
+        # provoquer une séparation par débordement. Une fois pageBreakBefore posé,
+        # ils créeraient une page intercalaire. Ils sont supprimables uniquement
+        # dans cette zone : les réservations situées AVANT les logos restent
+        # strictement intactes.
+        dernier_texte_couverture = representant_idx
+        for i in range(representant_idx, titre_idx):
+            if (body[i].text or "").strip():
+                dernier_texte_couverture = i
+        for p in list(body[dernier_texte_couverture + 1:titre_idx]):
+            if _vide_supprimable(p):
+                p._element.getparent().remove(p._element)
+
+        # Une seule méthode de séparation : pageBreakBefore sur le titre.
+        titre = body[titre_idx]
+        titre_pPr = titre._element.get_or_add_pPr()
+        for existing in list(titre_pPr.findall(qn("w:pageBreakBefore"))):
+            titre_pPr.remove(existing)
+        titre_pPr.append(OxmlElement("w:pageBreakBefore"))
+        for br in list(titre._element.findall(".//" + qn("w:br"))):
+            if br.get(qn("w:type")) == "page":
+                br.getparent().remove(br)
+
+        doc.save(str(docx_path))
+        _nettoyer_doublons_zip(docx_path)
+    except Exception as exc:
+        print(f"[separation couverture/presentation] correction ignorée : {exc}")
+    return docx_path
+
+
 def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
     """
     Génère un .docx en remplissant le template annoté avec les données fournies.
@@ -1126,6 +1390,8 @@ def generer_devis(template_path: Path, data: Dict, output_path: Path) -> Path:
         # texte À DROITE du logo (titre collé au logo). On force « haut et bas »
         # (wrapTopAndBottom) : le texte démarre alors TOUJOURS sous le logo.
         _forcer_logo_habillage_haut_bas(out)
+        # Dernière étape, après LibreOffice : figer la frontière page 1/page 2.
+        _verrouiller_separation_couverture_presentation(out)
         return out
     if template_stem == "bureaux_petit":
         _generer_bureaux_petit_preserve_layout(template_path, data, output_path)
@@ -4746,22 +5012,53 @@ def _forcer_logo_habillage_haut_bas(docx_path: Path) -> Path:
     space_before ne suffit alors pas : Word replace le paragraphe dans la zone
     d'habillage à droite de l'image.
 
-    Correctif : sur chaque en-tête, on remplace l'habillage du logo par
-    wrapTopAndBottom (et behindDoc=0). Word place alors OBLIGATOIREMENT le contenu
-    SOUS le logo, jamais à côté. On ne touche ni à l'image, ni à sa position, ni au
-    filigrane ni au reste : uniquement la propriété d'habillage."""
+    Correctif : sur les en-têtes des pages intérieures, on remplace l'habillage du
+    logo par wrapTopAndBottom (et behindDoc=0). L'en-tête « première page » de la
+    couverture conserve impérativement le wrapSquare natif : wrapTopAndBottom y
+    agit comme une barrière verticale sur tout le corps et repousse les logos du
+    bas ainsi que le bloc représentant sur la page 2.
+
+    On ne touche ni aux images, ni à leurs positions, dimensions ou relations
+    média : uniquement à la propriété d'habillage du logo d'en-tête."""
     import zipfile
     import re as _re
     import os as _os
+    import xml.etree.ElementTree as _ET
 
     src = str(docx_path)
     tmp = src + ".wrapfix.tmp"
     changed = False
     with zipfile.ZipFile(src) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        first_header_part = None
+        try:
+            ns_w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            ns_r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+            ns_rel = "http://schemas.openxmlformats.org/package/2006/relationships"
+            document_root = _ET.fromstring(zin.read("word/document.xml"))
+            rels_root = _ET.fromstring(zin.read("word/_rels/document.xml.rels"))
+            rel_targets = {
+                rel.get("Id"): rel.get("Target")
+                for rel in rels_root.findall(f"{{{ns_rel}}}Relationship")
+            }
+            first_ref = document_root.find(
+                f".//{{{ns_w}}}sectPr/{{{ns_w}}}headerReference"
+                f"[@{{{ns_w}}}type='first']"
+            )
+            if first_ref is not None:
+                target = rel_targets.get(first_ref.get(f"{{{ns_r}}}id"))
+                if target:
+                    target = target.replace("\\", "/").lstrip("/")
+                    first_header_part = (
+                        target if target.startswith("word/") else f"word/{target}"
+                    )
+        except Exception:
+            first_header_part = None
+
         for it in zin.infolist():
             data = zin.read(it.filename)
             if _re.match(r"word/header\d+\.xml", it.filename):
                 x = data.decode("utf-8", "ignore")
+                is_first_page_header = it.filename == first_header_part
 
                 def _fix_anchor(m):
                     nonlocal changed
@@ -4774,16 +5071,30 @@ def _forcer_logo_habillage_haut_bas(docx_path: Path) -> Path:
                     if not (ext and 0.9e6 < int(ext.group(1)) < 1.9e6):
                         return a
                     a2 = _re.sub(r'behindDoc="1"', 'behindDoc="0"', a)
-                    # Remplacer l'habillage existant (carré, serré, au travers ou
-                    # aucun) par « haut et bas ».
-                    a2 = _re.sub(r"<wp:wrapSquare[^>]*/>", "<wp:wrapTopAndBottom/>", a2)
-                    a2 = _re.sub(r"<wp:wrapSquare\b.*?</wp:wrapSquare>",
-                                 "<wp:wrapTopAndBottom/>", a2, flags=_re.S)
-                    a2 = _re.sub(r"<wp:wrapTight\b.*?</wp:wrapTight>",
-                                 "<wp:wrapTopAndBottom/>", a2, flags=_re.S)
-                    a2 = _re.sub(r"<wp:wrapThrough\b.*?</wp:wrapThrough>",
-                                 "<wp:wrapTopAndBottom/>", a2, flags=_re.S)
-                    a2 = _re.sub(r"<wp:wrapNone\s*/>", "<wp:wrapTopAndBottom/>", a2)
+                    replacement = (
+                        '<wp:wrapSquare wrapText="bothSides"/>'
+                        if is_first_page_header
+                        else "<wp:wrapTopAndBottom/>"
+                    )
+                    # Remplacer l'habillage existant, sans toucher aux autres
+                    # propriétés de l'ancre.
+                    a2 = _re.sub(r"<wp:wrapSquare[^>]*/>", replacement, a2)
+                    a2 = _re.sub(
+                        r"<wp:wrapSquare\b.*?</wp:wrapSquare>",
+                        replacement, a2, flags=_re.S,
+                    )
+                    a2 = _re.sub(
+                        r"<wp:wrapTight\b.*?</wp:wrapTight>",
+                        replacement, a2, flags=_re.S,
+                    )
+                    a2 = _re.sub(
+                        r"<wp:wrapThrough\b.*?</wp:wrapThrough>",
+                        replacement, a2, flags=_re.S,
+                    )
+                    a2 = _re.sub(r"<wp:wrapNone\s*/>", replacement, a2)
+                    a2 = _re.sub(
+                        r"<wp:wrapTopAndBottom\s*/>", replacement, a2
+                    )
                     if a2 != a:
                         changed = True
                     return a2
